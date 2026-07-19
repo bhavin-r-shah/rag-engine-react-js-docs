@@ -41,48 +41,15 @@ only after the download succeeds, and writes the resolved upstream commit to
 `react-js-docs/.react-docs-commit`. Files removed upstream are therefore also
 removed locally.
 
-## Local setup
+## Run the project with Python
 
 ### Prerequisites
 
-- Node.js 20 or newer
-- npm (included with Node.js)
-- Python 3.10 or newer (for the chunking stage)
+- Python 3.10 or newer
 
-Install dependencies from the repository root:
-
-```bash
-npm install
-```
-
-The ingestion implementation currently uses only Node.js built-in modules, so
-installation does not download third-party runtime packages; it verifies the
-package metadata and creates the local lockfile state.
-
-Run the implemented discovery, Markdown/MDX parsing, and normalization stages:
-
-```bash
-npm run ingest
-```
-
-The command reads `react-js-docs/` and writes normalized records to
-`output/normalized-documents.json`. Both paths can be overridden with positional
-arguments:
-
-```bash
-npm run ingest -- ./path/to/corpus ./path/to/output.json
-```
-
-Run the automated checks:
-
-```bash
-npm test
-npm run check
-```
-
-### Run the Python chunker
-
-Create an isolated environment and install the Python command from the repository root:
+The complete implemented ingestion and chunking workflow is Python-only. Node.js
+and npm are not required. Create an isolated environment and install the command
+from the repository root:
 
 ```bash
 python3 -m venv .venv
@@ -90,35 +57,37 @@ source .venv/bin/activate
 python -m pip install -e '.[test]'
 ```
 
-Then read every Markdown/MDX file in `react-js-docs/` and write JSON Lines output:
+Read every Markdown/MDX file in `react-js-docs/` and write retrieval-ready JSON
+Lines records by running:
 
 ```bash
 chunk-react-docs
-# Equivalent module form:
+# Equivalent Python module form:
 python -m react_docs_chunker.cli
 ```
 
-The default output is `output/react-doc-chunks.jsonl`. Override the paths and token
-settings when experimenting with retrieval quality:
+The default output is `output/react-doc-chunks.jsonl`. Override the input, output,
+and token settings when experimenting with retrieval quality:
 
 ```bash
 chunk-react-docs ./react-js-docs ./output/custom.jsonl \
   --target-tokens 600 --max-tokens 900 --overlap-tokens 75
+```
+
+Run the Python tests with:
+
+```bash
 pytest
 ```
 
-Each line is a parent or child record with stable IDs, source provenance, heading
-breadcrumbs, an anchor, token count, and retrieval text. The recommended strategy is
-heading-aware parent/child chunking: keep a complete section as the parent, retrieve
-smaller 400–700-token children, preserve code with its explanation, and use 50–100
-tokens of overlap only when an oversized section must be divided. These are starting
-values; tune them using retrieval recall and citation accuracy for your application.
-
-The Node output is an intermediate ingestion artifact, not a vector database. It
-contains separate retrieval text and display Markdown, source provenance,
-classification, warnings, and deterministic content hashes. The remaining
-chunking and indexing stages are specified in
-[`low-level-design.md`](low-level-design.md).
+Each output line is a parent or child record containing stable IDs, source path
+and URL, route, document type, source checksum, heading breadcrumbs, anchor,
+content kind, token count, and retrieval text. The recommended strategy is
+heading-aware parent/child chunking: keep a complete section as the parent,
+retrieve smaller 400–700-token children, preserve code with its explanation, and
+use 50–100 tokens of overlap only when an oversized section must be divided.
+These are starting values; tune them using retrieval recall and citation accuracy
+for your application.
 
 ## Using the corpus in a RAG pipeline
 

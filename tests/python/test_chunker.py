@@ -36,6 +36,9 @@ More details here.
     assert any(row["headingPath"] == ["Beginner Guide", "Setup", "Details"] for row in rows)
     assert any("const answer = 42" in row["text"] for row in rows)
     assert all(row["sourcePath"] == "react-js-docs/guide.md" for row in rows)
+    assert all(row["route"] == "/guide" for row in rows)
+    assert all(row["sourceUrl"] == "https://react.dev/guide" for row in rows)
+    assert all(row["sourceHash"].startswith("sha256:") for row in rows)
 
 
 def test_discovers_markdown_case_insensitively_in_stable_order(tmp_path):

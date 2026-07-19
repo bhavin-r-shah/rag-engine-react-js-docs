@@ -16,6 +16,7 @@ from typing import Callable
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 ANCHOR_RE = re.compile(r"\s*\{\/\*#?([\w-]+)\*\/\}\s*$")
 FRONTMATTER_TITLE_RE = re.compile(r"^title:\s*[\"']?(.*?)[\"']?\s*$", re.MULTILINE)
+FRONTMATTER_META_RE = re.compile(r"^meta:\s*[\"']?(.*?)[\"']?\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,10 @@ def _split_frontmatter(markdown: str) -> tuple[str, str | None]:
     for index in range(1, len(lines)):
         if lines[index].strip() == "---":
             yaml_text = "\n".join(lines[1:index])
-            match = FRONTMATTER_TITLE_RE.search(yaml_text)
+            # React occasionally uses `meta` instead of `title`, so use it as the
+            # second choice. Parsing only these scalar fields keeps the tool small
+            # and, importantly, never constructs executable Python objects from YAML.
+            match = FRONTMATTER_TITLE_RE.search(yaml_text) or FRONTMATTER_META_RE.search(yaml_text)
             return "\n".join(lines[index + 1 :]), match.group(1).strip() if match else None
     # An unmatched marker is ordinary content; silently deleting it would lose text.
     return markdown, None
@@ -163,20 +167,40 @@ def _content_kind(text: str) -> str:
     return "code" if has_code else "prose"
 
 
+def _source_metadata(path: Path, corpus_root: Path, raw: str) -> dict[str, str]:
+    """Derive the route, URL, category, and checksum used in citations and filters."""
+    relative = path.relative_to(corpus_root)
+    flattened_parts = list(relative.with_suffix("").parts)
+    route_parts: list[str] = []
+    for part in flattened_parts:
+        route_parts.extend(piece for piece in part.split("--") if piece)
+    if route_parts and route_parts[-1] == "index":
+        route_parts.pop()
+    route = "/" + "/".join(route_parts)
+    source_path = (Path(corpus_root.name) / relative).as_posix()
+    return {
+        "sourcePath": source_path,
+        "sourceUrl": "https://react.dev" + route,
+        "route": route,
+        "docType": route_parts[0] if route_parts else "root",
+        "sourceHash": "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    }
+
+
 def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], target: int, maximum: int, overlap: int) -> list[dict]:
     """Read one document and return JSON-serializable parent and child records."""
     raw = path.read_text(encoding="utf-8")
     body, frontmatter_title = _split_frontmatter(raw)
     fallback = path.stem.split("--")[-1].replace("-", " ").title()
     title = frontmatter_title or fallback
-    source = path.relative_to(corpus_root.parent).as_posix()
-    document_id = _stable_id(source)
+    metadata = _source_metadata(path, corpus_root, raw)
+    document_id = _stable_id(metadata["sourcePath"])
     records: list[dict] = []
     for section_number, section in enumerate(_sections(body, title)):
         parent_text = "\n\n".join(section.blocks)
         heading_path = list(section.headings)
         parent_id = _stable_id(document_id, section.anchor, parent_text)
-        records.append({"recordType": "parent", "documentId": document_id, "chunkId": parent_id, "sourcePath": source, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(parent_text), "chunkIndex": section_number, "tokenCount": count(parent_text), "text": parent_text})
+        records.append({"recordType": "parent", "documentId": document_id, "chunkId": parent_id, **metadata, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(parent_text), "chunkIndex": section_number, "tokenCount": count(parent_text), "text": parent_text})
         prefix = f"{' > '.join(heading_path)}\n\n"
         # The breadcrumb is part of the embedded child, so reserve its tokens when
         # packing content. This guarantees the complete record respects the limit.
@@ -187,7 +211,7 @@ def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], t
         for child_number, child in enumerate(_pack_blocks(section.blocks, count, child_target, child_maximum, child_overlap)):
             # Breadcrumb text makes a retrieved fragment understandable on its own.
             retrieval_text = prefix + child
-            records.append({"recordType": "child", "documentId": document_id, "parentId": parent_id, "chunkId": _stable_id(parent_id, child), "sourcePath": source, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(child), "chunkIndex": child_number, "tokenCount": count(retrieval_text), "text": retrieval_text})
+            records.append({"recordType": "child", "documentId": document_id, "parentId": parent_id, "chunkId": _stable_id(parent_id, child), **metadata, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(child), "chunkIndex": child_number, "tokenCount": count(retrieval_text), "text": retrieval_text})
     return records
 
 
@@ -195,7 +219,9 @@ def chunk_corpus(corpus: Path, output: Path, count: Callable[[str], int], target
     """Chunk every Markdown/MDX file deterministically and write newline-delimited JSON."""
     if not (0 <= overlap < target <= maximum):
         raise ValueError("expected 0 <= overlap < target <= maximum")
-    files = sorted(path for path in corpus.iterdir() if path.is_file() and path.suffix.lower() in {".md", ".mdx"})
+    # rglob also supports a future nested corpus, while sorting makes two identical
+    # runs byte-for-byte reproducible regardless of filesystem traversal order.
+    files = sorted(path for path in corpus.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in {".md", ".mdx"})
     records = [record for path in files for record in chunk_document(path, corpus, count, target, maximum, overlap)]
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")

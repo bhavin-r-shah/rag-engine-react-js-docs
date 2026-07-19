@@ -4,7 +4,7 @@
 
 This design defines a deterministic, incremental, structure-aware ingestion pipeline for the Markdown and MDX files in `react-js-docs/`. The corpus contains learning guides, API references, warnings, errors, community pages, and dated blog posts. Retrieval units must preserve React documentation semantics—titles, API identifiers, heading hierarchy, prose, and associated examples—instead of splitting raw files at arbitrary character boundaries.
 
-The first implementation milestone covers discovery, syntax-tree parsing, and normalization. Chunking, indexing, incremental updates, validation, and retrieval evaluation are specified here as subsequent milestones.
+The Python implementation covers deterministic discovery, safe Markdown structure parsing, metadata derivation, and section-aware parent/child chunking. Indexing, incremental updates, validation, and retrieval evaluation remain subsequent milestones.
 
 ## End-to-end architecture
 
@@ -55,136 +55,26 @@ Generate two representations:
 
 Remove front matter, navigation-only elements, MDX imports/exports, presentation wrappers, explicit heading-comment markup, and redundant whitespace. Do not lowercase, stem, execute, or reformat identifiers such as `useEffect`, `httpEquiv`, and `renderToPipeableStream`. Resolve the title in this order: front-matter `title`, front-matter `meta`, first level-one heading, then final route segment. Hash normalized retrieval content for caching and change detection.
 
-## Current ingest script: behavior, output, and rationale
+## Current Python command: behavior and output
 
-### Command and execution flow
+The complete implemented workflow runs through `chunk-react-docs` (or the equivalent
+`python -m react_docs_chunker.cli`) and requires no Node.js runtime. By default it
+reads `react-js-docs/` and writes `output/react-doc-chunks.jsonl`.
 
-The current `npm run ingest` command executes `node src/cli.js`. By default, it reads from `react-js-docs/` and writes to `output/normalized-documents.json`. Both locations can be overridden with positional arguments:
+The command discovers Markdown and MDX files in deterministic order, treats all MDX
+and fenced examples as inert text, extracts titles and heading anchors, derives React
+routes and canonical URLs, groups content by heading, and creates parent/child chunks.
+It uses `cl100k_base` to measure model tokens and writes one JSON object per line.
 
-```bash
-npm run ingest
+Each record contains `recordType`, stable `documentId` and `chunkId`, `sourcePath`,
+`sourceUrl`, `route`, `docType`, `sourceHash`, `title`, `headingPath`, `anchor`,
+`contentKind`, `chunkIndex`, `tokenCount`, and `text`. Child records also identify their
+`parentId`. The output is ready for a later embedding/indexing stage; it is not itself
+a vector database.
 
-# Equivalent explicit invocation
-node src/cli.js react-js-docs output/normalized-documents.json
-
-# Custom input and output locations
-npm run ingest -- ./path/to/corpus ./path/to/output.json
-```
-
-The command performs the first three stages of this design in order:
-
-1. **Discover:** recursively find supported documents, validate paths, assign routes and canonical URLs, classify document types, and calculate source checksums.
-2. **Parse:** convert each Markdown or MDX document into an abstract syntax tree and parse its YAML front matter.
-3. **Normalize:** remove retrieval-irrelevant presentation syntax and produce separate retrieval and display representations.
-
-The destination directory is created automatically. On success, the CLI reports the number of normalized documents, output path, and accumulated warning count. On failure, it prints the error and exits with a nonzero status.
-
-### Discovery record
-
-For each `.md` or `.mdx` source, discovery:
-
-- walks the corpus in deterministic lexical order;
-- ignores symbolic links and verifies that resolved paths remain inside the corpus root;
-- converts flattened filenames into React routes;
-- classifies the document from the first route segment;
-- produces a canonical `https://react.dev` URL;
-- computes a SHA-256 checksum over the original source; and
-- rejects duplicate canonical routes.
-
-For example, `react-js-docs/reference--react--useEffect.md` first becomes approximately:
-
-```json
-{
-  "sourcePath": "reference--react--useEffect.md",
-  "route": "/reference/react/useEffect",
-  "docType": "reference",
-  "sourceUrl": "https://react.dev/reference/react/useEffect",
-  "sourceHash": "<sha256>",
-  "rawMarkdown": "<original file contents>"
-}
-```
-
-A terminal `index` segment is removed: `learn--index.md` becomes `/learn`, while the root `index.md` becomes `/`.
-
-### Parsing behavior
-
-The parser recognizes YAML front matter, headings, paragraphs, inline code, fenced code and its metadata, links, images, lists, MDX flow and text elements, and raw HTML. This structural representation lets later stages distinguish content boundaries rather than treating the document as an arbitrary string.
-
-Invalid YAML is recorded as a recoverable document warning. Raw HTML is preserved as data and also produces a warning. JavaScript, JSX, HTML, MDX expressions, and documentation examples are never executed during ingestion.
-
-### Normalized representations
-
-Normalization produces two representations because retrieval and answer presentation have different requirements.
-
-`retrievalText` is intended for later section-aware chunking, embedding, and lexical indexing. It contains the resolved title, canonical route, searchable prose, exact React identifiers, and useful example content. The title is selected in this order:
-
-1. front-matter `title`;
-2. front-matter `meta`;
-3. the first level-one heading;
-4. the final route segment; or
-5. `React` for the root document.
-
-`displayMarkdown` is intended for answer-generation context and citations. It preserves readable Markdown and fenced code while removing YAML front matter, MDX imports and exports, empty wrappers, and presentation-only elements such as `<InlineToc />`. Content nested inside semantic wrappers such as `<Intro>` remains available even though the wrapper itself is removed.
-
-### Output format
-
-The CLI writes a single JSON object with an ingestion timestamp and a `documents` array:
-
-```json
-{
-  "generatedAt": "2026-07-19T12:34:56.789Z",
-  "documents": [
-    {
-      "sourcePath": "reference--react--useEffect.md",
-      "sourceUrl": "https://react.dev/reference/react/useEffect",
-      "route": "/reference/react/useEffect",
-      "docType": "reference",
-      "sourceHash": "f04a...",
-      "title": "useEffect",
-      "frontmatter": {
-        "title": "useEffect"
-      },
-      "warnings": [],
-      "retrievalText": "Title: useEffect\n\nRoute: /reference/react/useEffect\n\n...",
-      "displayMarkdown": "# useEffect\n\n`useEffect` is a React Hook...",
-      "contentHash": "90bc..."
-    }
-  ]
-}
-```
-
-The normalized fields serve the following purposes:
-
-| Field | Purpose |
-| --- | --- |
-| `sourcePath` | Corpus-relative source provenance |
-| `sourceUrl` | Canonical React documentation URL |
-| `route` | React documentation route |
-| `docType` | Classification such as `learn`, `reference`, or `blog` |
-| `sourceHash` | SHA-256 checksum of the original source |
-| `title` | Resolved document title |
-| `frontmatter` | Parsed YAML metadata |
-| `warnings` | Recoverable parsing or content warnings |
-| `retrievalText` | Search-oriented normalized content |
-| `displayMarkdown` | Human-readable context for generation and citations |
-| `contentHash` | SHA-256 checksum of normalized retrieval content |
-
-This file is an intermediate ingestion artifact, not a vector database or completed RAG index.
-
-### Current implementation boundary
-
-The Node normalization command does **not** yet perform the following steps. The
-separate Python `chunk-react-docs` command now implements section-aware parent/child
-chunking, heading breadcrumbs, token counting, and deterministic chunk IDs:
-
-- generate embeddings;
-- build a lexical/BM25 index;
-- write to a vector database;
-- retrieve or rerank content;
-- answer questions; or
-- maintain an incremental ingestion manifest.
-
-The remaining responsibilities belong to the subsequent stages specified below.
+The Python command does **not** yet generate embeddings, build a lexical/BM25 index,
+write to a vector database, retrieve or rerank content, answer questions, or maintain
+an incremental ingestion manifest.
 
 ### Why normalize before chunking raw Markdown
 
