@@ -6,219 +6,101 @@ This design defines a deterministic, incremental, structure-aware ingestion pipe
 
 The Python implementation covers deterministic discovery, safe Markdown structure parsing, metadata derivation, and section-aware parent/child chunking. Indexing, incremental updates, validation, and retrieval evaluation remain subsequent milestones.
 
-## End-to-end architecture
+## Implemented Python architecture
 
 ```text
 react-js-docs/**/*.md(x)
         |
         v
-secure deterministic discovery
+safe, deterministic Python discovery
         |
         v
-Markdown/MDX AST parsing
+front-matter, fence, block, and heading scanner
         |
         v
-semantic normalization
+heading sections (parents)
         |
         v
-document -> heading sections -> child chunks
-        |              |
-        |              +-> lexical/BM25 index
-        +-> parent store
-                       +-> embedding cache -> vector index
-                                              |
-                                              v
-                                      corpus validation
-                                              |
-                                              v
-                                   atomic index promotion
+token-bounded retrieval chunks (children)
+        |
+        v
+output/react-doc-chunks.jsonl
 ```
+
+The installed `chunk-react-docs` console command and
+`python -m react_docs_chunker.cli` module command are equivalent. Both call the Python
+package in `python-src/react_docs_chunker/`; there is no Node.js ingestion runtime.
 
 ## 1. Discover and classify documents
 
-Recursively discover `.md` and `.mdx` files in stable lexical order. Ignore symbolic links and reject resolved paths outside the configured corpus root. A source record contains its corpus-relative path, inferred document type, route, canonical React URL, SHA-256 source checksum, and raw Markdown.
+`chunk_corpus` recursively discovers `.md` and `.mdx` files case-insensitively, ignores
+symbolic links, and sorts paths before processing. Stable ordering makes repeated runs
+with identical input deterministic.
 
-Flattened names are converted to routes by replacing `--` boundaries with `/` and removing a terminal `index`. For example, `reference--react--useEffect.md` maps to `/reference/react/useEffect` and `https://react.dev/reference/react/useEffect`. The first route segment classifies the document as `learn`, `reference`, `warnings`, `errors`, `blog`, `community`, or another future upstream category. Duplicate routes are fatal.
+Flattened names become React routes by replacing `--` boundaries with `/` and removing
+a final `index`. For example, `reference--react--useEffect.md` maps to
+`/reference/react/useEffect` and `https://react.dev/reference/react/useEffect`. The
+first route segment supplies `docType`. Every record also receives a corpus-relative
+source path and SHA-256 checksum of its original UTF-8 text.
 
-## 2. Parse Markdown as a syntax tree
+## 2. Safely identify Markdown structure
 
-Use an AST-capable Markdown/MDX parser, not regular expressions. The parser must understand YAML front matter, explicit heading anchors, fenced code metadata, JSX/MDX wrappers, links, lists, tables, callouts, and inline code. It must retain the tree and parsed front matter as an intermediate representation.
+The implementation is a deliberately small, non-executing structure scanner. It reads
+documentation as UTF-8 text, extracts scalar `title` or `meta` front-matter values,
+recognizes ATX headings and React anchor comments, and groups paragraphs and fenced
+code into blocks. Fence state prevents a Python or shell comment beginning with `#`
+inside a code example from becoming a heading.
 
-React-specific components are handled deliberately. Semantic wrapper content such as `<Intro>` and Sandpack examples is retained, while presentation-only elements such as `<InlineToc />` are discarded. Unsupported constructs generate warnings rather than silently losing content. Embedded JavaScript, JSX, HTML, and examples are data and are never evaluated.
+The scanner never imports, evaluates, or renders JavaScript, JSX, MDX, HTML, or fenced
+examples. Website-specific MDX wrappers remain inert source text. A future normalization
+milestone may use a full Markdown/MDX AST when presentation wrappers must be removed;
+the current chunker does not claim full CommonMark or MDX parsing.
 
-## 3. Normalize without destroying meaning
+## 3. Create section parents and retrieval children
 
-Generate two representations:
+A heading begins a semantic section and its nested heading breadcrumb is attached to
+each child. The complete section becomes a parent. Small sections yield one child;
+oversized sections are packed at blank-line-separated block boundaries. Complete
+fenced examples remain blocks. Overlap copies only complete trailing blocks from the
+same section. A word-boundary safety split is used only when one indivisible block
+would exceed the hard maximum.
 
-1. `retrievalText` for embeddings and lexical search. It includes the title, route, prose, exact API identifiers, and useful code.
-2. `displayMarkdown` for model context and citations. It preserves readable Markdown, fenced code, and code-fence attributes.
+The heading breadcrumb is included in the child's token count. The implementation
+reserves those tokens before packing content so a child respects `MAX_TOKENS`. It uses
+tiktoken's `cl100k_base` encoding rather than character or word counts.
 
-Remove front matter, navigation-only elements, MDX imports/exports, presentation wrappers, explicit heading-comment markup, and redundant whitespace. Do not lowercase, stem, execute, or reformat identifiers such as `useEffect`, `httpEquiv`, and `renderToPipeableStream`. Resolve the title in this order: front-matter `title`, front-matter `meta`, first level-one heading, then final route segment. Hash normalized retrieval content for caching and change detection.
+All default strategy variables live in
+`python-src/react_docs_chunker/config.py`: `CHUNK_BY_HEADING`, `TARGET_TOKENS`,
+`MAX_TOKENS`, `OVERLAP_TOKENS`, and `TOKENIZER_ENCODING`. CLI flags can temporarily
+override the three numeric values.
 
-## Current Python command: behavior and output
+## 4. Output records
 
-The complete implemented workflow runs through `chunk-react-docs` (or the equivalent
-`python -m react_docs_chunker.cli`) and requires no Node.js runtime. By default it
-reads `react-js-docs/` and writes `output/react-doc-chunks.jsonl`.
+The command writes newline-delimited JSON to `output/react-doc-chunks.jsonl` by default.
+Every parent and child includes `recordType`, stable `documentId` and `chunkId`,
+`sourcePath`, `sourceUrl`, `route`, `docType`, `sourceHash`, `title`, `headingPath`,
+`anchor`, `contentKind`, `chunkIndex`, `tokenCount`, and `text`. A child additionally
+contains `parentId`.
 
-The command discovers Markdown and MDX files in deterministic order, treats all MDX
-and fenced examples as inert text, extracts titles and heading anchors, derives React
-routes and canonical URLs, groups content by heading, and creates parent/child chunks.
-It uses `cl100k_base` to measure model tokens and writes one JSON object per line.
+IDs derive from source identity, section anchor, and content instead of corpus insertion
+order. The program creates the destination directory automatically. The JSONL output is
+ready for a later embedding and indexing stage; it is not a vector database.
 
-Each record contains `recordType`, stable `documentId` and `chunkId`, `sourcePath`,
-`sourceUrl`, `route`, `docType`, `sourceHash`, `title`, `headingPath`, `anchor`,
-`contentKind`, `chunkIndex`, `tokenCount`, and `text`. Child records also identify their
-`parentId`. The output is ready for a later embedding/indexing stage; it is not itself
-a vector database.
+## 5. Current implementation boundary
 
-The Python command does **not** yet generate embeddings, build a lexical/BM25 index,
-write to a vector database, retrieve or rerank content, answer questions, or maintain
-an incremental ingestion manifest.
+The Python command implements discovery, metadata derivation, structure-aware
+parent/child chunking, model-token counting, and JSONL serialization. It does not yet
+generate embeddings, build a lexical/BM25 index, write to a vector database, retrieve
+or rerank content, answer questions, or maintain an incremental ingestion manifest.
 
-### Why normalize before chunking raw Markdown
+## Why structure-aware chunking is recommended
 
-The ingestion stages do not replace chunking. They ensure that chunking operates on clean, understood, traceable document content instead of arbitrary raw Markdown strings.
-
-#### Preserve semantic boundaries
-
-A fixed token or character splitter can divide content in the middle of a fenced JavaScript example, prop list, MDX wrapper, warning, link, or heading and its explanatory paragraph. Parsing first exposes headings, paragraphs, lists, tables, wrappers, and complete code blocks. The chunker can therefore use structural boundaries and keep associated prose and examples together.
-
-#### Remove presentation noise
-
-React documentation contains elements meant for the website renderer rather than retrieval, including YAML front matter, `<InlineToc />`, semantic wrappers, Sandpack components, and MDX imports or exports. Embedding raw Markdown would allow those implementation details to compete with the actual documentation. Normalization removes presentation-only syntax while retaining meaningful child content.
-
-#### Optimize retrieval and presentation independently
-
-A single raw representation is not ideal for both search and answer generation. `retrievalText` explicitly includes search signals such as title and route. `displayMarkdown` retains readable formatting and code for model context and citations. Without this separation, the pipeline must either embed noisy display syntax or strip structure that the answering model needs.
-
-#### Preserve exact API terminology
-
-Identifiers such as `useEffect`, `useEffectEvent`, `useLayoutEffect`, `httpEquiv`, `renderToPipeableStream`, and `exhaustive-deps` must not be lowercased, stemmed, or reformatted. Preserving them supports exact-term retrieval today and a future hybrid semantic-plus-lexical index.
-
-#### Establish provenance before content is divided
-
-Every future chunk can inherit a source file, canonical route and URL, document category, title, original-source checksum, and normalized-content checksum. This supports citations, filters, debugging, change detection, stale-record deletion, and selective re-embedding.
-
-#### Enable deterministic incremental processing
-
-`sourceHash` identifies whether the source file changed. `contentHash` identifies whether its normalized retrieval representation changed. A future manifest can use these identities to reuse unchanged parsing and embedding results and to distinguish formatting-only changes from retrieval-relevant changes.
-
-#### Make quality problems observable
-
-Parsing warnings are attached to individual documents before chunks and embeddings are created. Unsupported syntax, invalid front matter, or risky raw constructs can be inspected and validated rather than being silently embedded.
-
-### Concrete comparison
-
-Given this source:
-
-````mdx
----
-meta: "useWidget"
----
-
-<Intro>
-
-Use the `useWidget` Hook to synchronize a widget.
-
-</Intro>
-
-<InlineToc />
-
-## Usage {/*usage*/}
-
-```js src/App.js active
-useWidget();
-```
-````
-
-A direct raw chunk contains YAML syntax, wrapper names, a presentation component, and an anchor comment in addition to the useful documentation. The normalized retrieval representation is closer to:
-
-```text
-Title: useWidget
-
-Route: /reference/react/useWidget
-
-Use the useWidget Hook to synchronize a widget.
-Usage
-useWidget();
-```
-
-The display representation remains readable and code-aware:
-
-````md
-Use the `useWidget` Hook to synchronize a widget.
-
-## Usage
-
-```js src/App.js active
-useWidget();
-```
-````
-
-The resulting boundary is:
-
-```text
-Raw React Markdown
-        |
-        v
-Discover and classify
-        |
-        v
-Parse Markdown/MDX structure
-        |
-        v
-Normalize for retrieval and display
-        |
-        v
-Structured JSON artifact
-        |
-        v
-Section-aware chunking
-        |
-        v
-Embedding and lexical indexing
-```
-
-## 4. Section-aware parent-child chunking
-
-Split a source document at headings and attach its full breadcrumb, for example `<meta> > Reference > Props`. Keep small sections intact. Split oversized sections only at paragraph, list, table, or example boundaries, and keep code with its explanatory prose. Do not isolate individual prop-list entries. Apply overlap only to children created from the same oversized section.
-
-This stage is implemented by the Python `chunk-react-docs` command. It reads the
-Markdown corpus without evaluating MDX, writes JSON Lines parent and child records,
-and uses `cl100k_base` tokenization so limits reflect model tokens rather than raw
-characters. A word-level fallback split is used only when a single indivisible block
-would otherwise exceed the hard limit.
-
-Initial configurable targets are 400–700 tokens per child, a hard maximum of 800–1,000 tokens, and 50–100 tokens of overlap when a split is necessary. Store the full section as a parent and use smaller children for retrieval. Final values must be selected from retrieval evaluation, not intuition.
-
-## 5. Versioned provenance metadata
-
-Every parent and child record includes `schemaVersion`, `pipelineVersion`, stable `documentId` and `chunkId`, `sourcePath`, `sourceUrl`, `route`, `docType`, `title`, `headingPath`, anchor, content kind, language, optional publication date, source and content hashes, chunk index, and token count. URLs include explicit anchors where available.
-
-IDs derive from stable source identity, section anchor, and normalized content rather than insertion order. Reject missing provenance, malformed URLs, absolute local paths, duplicate IDs, and invalid token counts.
-
-An illustrative chunk record is:
-
-```json
-{
-  "schemaVersion": 1,
-  "documentId": "sha256:...",
-  "chunkId": "sha256:...",
-  "sourcePath": "react-js-docs/reference--react-dom--components--meta.md",
-  "sourceUrl": "https://react.dev/reference/react-dom/components/meta#props",
-  "docType": "reference",
-  "title": "<meta>",
-  "headingPath": ["Reference", "<meta>", "Props"],
-  "anchor": "props",
-  "contentKind": "prose_and_code",
-  "language": "en",
-  "publishedAt": null,
-  "sourceHash": "sha256:...",
-  "chunkIndex": 3,
-  "tokenCount": 612
-}
-```
+Fixed character windows can split a heading from its explanation or cut through a
+fenced example. Heading-first parent/child chunking preserves the subject of a React
+API section, while block boundaries keep most prose, lists, and examples coherent.
+Source metadata is added before splitting so every retrieved child remains traceable.
+Exact identifiers such as `useEffect`, `httpEquiv`, and `renderToPipeableStream` are
+preserved for later semantic and lexical retrieval.
 
 ## 6. Embedding and hybrid indexing
 

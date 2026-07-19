@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from .config import CHUNK_BY_HEADING, MAX_TOKENS, OVERLAP_TOKENS, TARGET_TOKENS
+
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 ANCHOR_RE = re.compile(r"\s*\{\/\*#?([\w-]+)\*\/\}\s*$")
 FRONTMATTER_TITLE_RE = re.compile(r"^title:\s*[\"']?(.*?)[\"']?\s*$", re.MULTILINE)
@@ -196,7 +198,13 @@ def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], t
     metadata = _source_metadata(path, corpus_root, raw)
     document_id = _stable_id(metadata["sourcePath"])
     records: list[dict] = []
-    for section_number, section in enumerate(_sections(body, title)):
+    # Heading chunking is the recommended default. Keeping this switch here makes
+    # config.py truthful: setting it to False treats the document as one section,
+    # after which the same safe block and token rules still create child chunks.
+    sections = _sections(body, title) if CHUNK_BY_HEADING else [
+        Section((title,), "", tuple(_markdown_blocks(body)))
+    ]
+    for section_number, section in enumerate(sections):
         parent_text = "\n\n".join(section.blocks)
         heading_path = list(section.headings)
         parent_id = _stable_id(document_id, section.anchor, parent_text)
@@ -215,7 +223,14 @@ def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], t
     return records
 
 
-def chunk_corpus(corpus: Path, output: Path, count: Callable[[str], int], target: int = 600, maximum: int = 900, overlap: int = 75) -> int:
+def chunk_corpus(
+    corpus: Path,
+    output: Path,
+    count: Callable[[str], int],
+    target: int = TARGET_TOKENS,
+    maximum: int = MAX_TOKENS,
+    overlap: int = OVERLAP_TOKENS,
+) -> int:
     """Chunk every Markdown/MDX file deterministically and write newline-delimited JSON."""
     if not (0 <= overlap < target <= maximum):
         raise ValueError("expected 0 <= overlap < target <= maximum")
