@@ -1,10 +1,36 @@
-# React documentation RAG ingestion: low-level design
+# React documentation RAG: low-level design
 
 ## Purpose and scope
 
-This design defines a deterministic, incremental, structure-aware ingestion pipeline for the Markdown and MDX files in `react-js-docs/`. The corpus contains learning guides, API references, warnings, errors, community pages, and dated blog posts. Retrieval units must preserve React documentation semantics—titles, API identifiers, heading hierarchy, prose, and associated examples—instead of splitting raw files at arbitrary character boundaries.
+This design describes an end-to-end retrieval-augmented generation (RAG) system for
+the Markdown and MDX files in `react-js-docs/`. The pipeline must preserve titles,
+heading hierarchy, React API identifiers, prose, examples, and provenance instead of
+splitting source files at arbitrary character boundaries.
 
-The Python implementation covers deterministic discovery, safe Markdown structure parsing, metadata derivation, and section-aware parent/child chunking. Indexing, incremental updates, validation, and retrieval evaluation remain subsequent milestones.
+Only deterministic document ingestion and structure-aware parent/child chunking are
+implemented today. Embedding, database indexing, retrieval, and answer generation are
+designs for subsequent milestones; their documents label proposed behavior explicitly.
+
+## End-to-end flow
+
+```text
+React Markdown/MDX
+        |
+        v
+ingestion -> chunking -> embedding -> database storage and indexing
+                                                   |
+                                                   v
+user query -> retrieval --------------------> grounded answer + citations
+```
+
+| Stage | Responsibility | Input | Output | Status |
+| --- | --- | --- | --- | --- |
+| [Ingestion](ingestion.md) | Discover files, read safe text, derive provenance, and serialize records. | `react-js-docs/**/*.md(x)` | Deterministic document metadata and JSONL records | **Implemented** for discovery, metadata, and JSONL; incremental ingestion is proposed. |
+| [Chunking](chunking.md) | Split each document first by heading section and then oversized sections by block/token limits. | Document body, title, metadata | Section parents and retrieval children | **Implemented** in Python. |
+| [Embedding](embedding.md) | Convert retrieval children into model-compatible dense vectors. | Child retrieval text | Versioned vectors and embedding metadata | **Proposed**. |
+| [Database storage and indexing](db-storage-indexing.md) | Store parents/children and build vector plus lexical indexes atomically. | Records, vectors, manifest | Searchable active index | **Proposed**; JSONL output is the only current storage. |
+| [Retrieval](retrieval.md) | Find, fuse, optionally rerank, and hydrate relevant evidence. | Validated search query | Ranked children, parents, and citations | **Proposed**. |
+| [User query](user-query.md) | Orchestrate query handling, context construction, grounded generation, and response telemetry. | User question | Answer with source citations | **Proposed**. |
 
 ## Implemented Python architecture
 
@@ -12,7 +38,7 @@ The Python implementation covers deterministic discovery, safe Markdown structur
 react-js-docs/**/*.md(x)
         |
         v
-safe, deterministic Python discovery
+safe, deterministic discovery and metadata derivation
         |
         v
 front-matter, fence, block, and heading scanner
@@ -27,110 +53,43 @@ token-bounded retrieval chunks (children)
 output/react-doc-chunks.jsonl
 ```
 
-The installed `chunk-react-docs` console command and
-`python -m react_docs_chunker.cli` module command are equivalent. Both call the Python
-package in `python-src/react_docs_chunker/`; there is no Node.js ingestion runtime.
+The installed `chunk-react-docs` command and `python -m react_docs_chunker.cli` are
+equivalent. Both use `python-src/react_docs_chunker/`; there is no Node.js ingestion
+runtime.
 
-## 1. Discover and classify documents
+## Implementation boundary
 
-`chunk_corpus` recursively discovers `.md` and `.mdx` files case-insensitively, ignores
-symbolic links, and sorts paths before processing. Stable ordering makes repeated runs
-with identical input deterministic.
+The Python package currently implements discovery, safe text loading, limited
+front-matter parsing, metadata and stable-ID derivation, heading-aware chunking,
+model-token counting, and JSONL serialization. It does **not** generate embeddings,
+write a vector or lexical database, maintain an incremental manifest, retrieve or
+rerank evidence, or answer user questions.
 
-Flattened names become React routes by replacing `--` boundaries with `/` and removing
-a final `index`. For example, `reference--react--useEffect.md` maps to
-`/reference/react/useEffect` and `https://react.dev/reference/react/useEffect`. The
-first route segment supplies `docType`. Every record also receives a corpus-relative
-source path and SHA-256 checksum of its original UTF-8 text.
+This boundary is intentional: later integrations remain behind the contracts in the
+linked stage designs, allowing providers and storage engines to change without
+rewriting the structure-aware ingestion core.
 
-## 2. Safely identify Markdown structure
+## Cross-stage contracts
 
-The implementation is a deliberately small, non-executing structure scanner. It reads
-documentation as UTF-8 text, extracts scalar `title` or `meta` front-matter values,
-recognizes ATX headings and React anchor comments, and groups paragraphs and fenced
-code into blocks. Fence state prevents a Python or shell comment beginning with `#`
-inside a code example from becoming a heading.
-
-The scanner never imports, evaluates, or renders JavaScript, JSX, MDX, HTML, or fenced
-examples. Website-specific MDX wrappers remain inert source text. A future normalization
-milestone may use a full Markdown/MDX AST when presentation wrappers must be removed;
-the current chunker does not claim full CommonMark or MDX parsing.
-
-## 3. Create section parents and retrieval children
-
-A heading begins a semantic section and its nested heading breadcrumb is attached to
-each child. The complete section becomes a parent. Small sections yield one child;
-oversized sections are packed at blank-line-separated block boundaries. Complete
-fenced examples remain blocks. Overlap copies only complete trailing blocks from the
-same section. A word-boundary safety split is used only when one indivisible block
-would exceed the hard maximum.
-
-The heading breadcrumb is included in the child's token count. The implementation
-reserves those tokens before packing content so a child respects `MAX_TOKENS`. It uses
-tiktoken's `cl100k_base` encoding rather than character or word counts.
-
-All default strategy variables live in
-`python-src/react_docs_chunker/config.py`: `CHUNK_BY_HEADING`, `TARGET_TOKENS`,
-`MAX_TOKENS`, `OVERLAP_TOKENS`, and `TOKENIZER_ENCODING`. CLI flags can temporarily
-override the three numeric values.
-
-## 4. Output records
-
-The command writes newline-delimited JSON to `output/react-doc-chunks.jsonl` by default.
-Every parent and child includes `recordType`, stable `documentId` and `chunkId`,
-`sourcePath`, `sourceUrl`, `route`, `docType`, `sourceHash`, `title`, `headingPath`,
-`anchor`, `contentKind`, `chunkIndex`, `tokenCount`, and `text`. A child additionally
-contains `parentId`.
-
-IDs derive from source identity, section anchor, and content instead of corpus insertion
-order. The program creates the destination directory automatically. The JSONL output is
-ready for a later embedding and indexing stage; it is not a vector database.
-
-## 5. Current implementation boundary
-
-The Python command implements discovery, metadata derivation, structure-aware
-parent/child chunking, model-token counting, and JSONL serialization. It does not yet
-generate embeddings, build a lexical/BM25 index, write to a vector database, retrieve
-or rerank content, answer questions, or maintain an incremental ingestion manifest.
-
-## Why structure-aware chunking is recommended
-
-Fixed character windows can split a heading from its explanation or cut through a
-fenced example. Heading-first parent/child chunking preserves the subject of a React
-API section, while block boundaries keep most prose, lists, and examples coherent.
-Source metadata is added before splitting so every retrieved child remains traceable.
-Exact identifiers such as `useEffect`, `httpEquiv`, and `renderToPipeableStream` are
-preserved for later semantic and lexical retrieval.
-
-## 6. Embedding and hybrid indexing
-
-Use dense vectors for semantic similarity and a lexical/BM25 index for exact identifiers, props, error numbers, and phrases. Store parent content by parent ID and index metadata for filtering by route, type, heading, and publication date. Combine dense and lexical candidates before optional reranking.
-
-The embedding client is provider-agnostic, batched, retryable, rate-limited, and cached by embedding-model identifier plus normalized-content hash. Record model and dimensions with the index and never mix incompatible vectors. All writes are idempotent upserts keyed by stable chunk ID.
-
-## 7. Incremental and atomic ingestion
-
-Persist a manifest of source checksums, document IDs, chunk IDs, schema and pipeline versions, embedding model, and successful ingestion time. Compare the current corpus with the last successful manifest and classify sources as added, changed, unchanged, or deleted. Reuse unchanged records and cached embeddings, fully replace changed-document chunks, and delete records for removed documents.
-
-Write into a staging namespace. Validate the complete staged corpus and atomically promote it; a failed run leaves the previously active index and manifest untouched.
-
-## 8. Quality gates and observability
-
-Before promotion, validate discovered versus parsed counts, empty documents and chunks, duplicate routes and IDs, unsupported MDX, missing titles, malformed anchors and URLs, token-size outliers, orphaned records, missing embeddings, vector dimensions, and unexpected loss of code examples. Every searchable record must contain retrieval text, display content, a compatible embedding, stable provenance, and a resolvable source URL.
-
-Emit structured logs and a JSON report containing document state counts, parent and child counts, token percentiles, warning and failure counts, timings, token volume, index writes, and embedding-cache hit rate. Never log credentials, full embedding payloads, or unnecessary complete documents.
-
-## 9. Retrieval evaluation
-
-Maintain a version-controlled golden dataset covering conceptual learning questions, exact API lookup, code examples, warnings and errors, React Server Components, version-sensitive blog facts, and similar identifiers that require disambiguation. Record acceptable routes, section anchors, and expected facts.
-
-Evaluate dense-only, lexical-only, and hybrid retrieval with recall at K, mean reciprocal rank, and section-level citation accuracy. Use results to choose chunk limits, hybrid fusion weights, metadata boosts, candidate counts, and reranking rather than tuning them manually.
+- A child is the searchable unit; its `parentId` resolves to the complete semantic
+  section used for display or expanded context.
+- Stable document and chunk IDs are the upsert, cache, and deletion keys.
+- Every searchable record retains source path, URL, route, checksum, title, heading
+  path, anchor, content kind, token count, and text for filtering and citations.
+- Embedding model identity and vector dimensions are part of index compatibility.
+- Only a completely validated staged index may replace the active index.
+- Retrieval returns evidence and provenance; query orchestration is responsible for
+  passing that evidence to a generator and rendering citations.
 
 ## Operational and security principles
 
-- Treat the corpus as untrusted input and never execute source content.
+- Treat the corpus and user input as untrusted; never execute source content.
 - Keep transformations deterministic, idempotent, and independently testable.
-- Fail explicitly on ambiguous identity or corrupt provenance; warn on recoverable syntax.
-- Keep provider and storage integrations behind interfaces.
-- Version schemas, pipeline behavior, manifests, indexes, and evaluation data.
-- Preserve the previously serving corpus until a replacement passes all quality gates.
+- Fail explicitly on ambiguous identity or corrupt provenance; warn on recoverable
+  syntax.
+- Keep model, embedding, and database integrations behind interfaces.
+- Version schemas, pipeline behavior, manifests, models, indexes, and evaluations.
+- Never log credentials, vectors, unnecessary complete documents, or sensitive query
+  content.
+- Preserve the previously serving corpus until a replacement passes every quality
+  gate.
