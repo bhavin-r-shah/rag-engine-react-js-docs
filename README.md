@@ -1,5 +1,10 @@
 # React documentation RAG corpus and Python chunker
 
+> [!WARNING]
+> **This project is under construction.** It is intended only for personal learning
+> and development, is not ready for production, and should not be used as a public
+> service or relied on by external users.
+
 This project turns the Markdown files from the official React documentation into
 small JSON records called **chunks**. A future AI search or retrieval-augmented
 generation (RAG) application can search these chunks and give the relevant text to
