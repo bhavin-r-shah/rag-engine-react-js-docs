@@ -173,11 +173,10 @@ This file is an intermediate ingestion artifact, not a vector database or comple
 
 ### Current implementation boundary
 
-The current command does **not** yet:
+The Node normalization command does **not** yet perform the following steps. The
+separate Python `chunk-react-docs` command now implements section-aware parent/child
+chunking, heading breadcrumbs, token counting, and deterministic chunk IDs:
 
-- divide normalized documents into sections or chunks;
-- add heading breadcrumbs to chunks;
-- count tokens;
 - generate embeddings;
 - build a lexical/BM25 index;
 - write to a vector database;
@@ -185,7 +184,7 @@ The current command does **not** yet:
 - answer questions; or
 - maintain an incremental ingestion manifest.
 
-Those responsibilities belong to the subsequent stages specified below.
+The remaining responsibilities belong to the subsequent stages specified below.
 
 ### Why normalize before chunking raw Markdown
 
@@ -293,7 +292,13 @@ Embedding and lexical indexing
 
 ## 4. Section-aware parent-child chunking
 
-Split a normalized document at headings and attach its full breadcrumb, for example `<meta> > Reference > Props`. Keep small sections intact. Split oversized sections only at paragraph, list, table, or example boundaries, and keep code with its explanatory prose. Do not isolate individual prop-list entries. Apply overlap only to children created from the same oversized section.
+Split a source document at headings and attach its full breadcrumb, for example `<meta> > Reference > Props`. Keep small sections intact. Split oversized sections only at paragraph, list, table, or example boundaries, and keep code with its explanatory prose. Do not isolate individual prop-list entries. Apply overlap only to children created from the same oversized section.
+
+This stage is implemented by the Python `chunk-react-docs` command. It reads the
+Markdown corpus without evaluating MDX, writes JSON Lines parent and child records,
+and uses `cl100k_base` tokenization so limits reflect model tokens rather than raw
+characters. A word-level fallback split is used only when a single indivisible block
+would otherwise exceed the hard limit.
 
 Initial configurable targets are 400–700 tokens per child, a hard maximum of 800–1,000 tokens, and 50–100 tokens of overlap when a split is necessary. Store the full section as a parent and use smaller children for retrieval. Final values must be selected from retrieval evaluation, not intuition.
 

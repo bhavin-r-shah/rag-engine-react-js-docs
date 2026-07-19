@@ -47,6 +47,7 @@ removed locally.
 
 - Node.js 20 or newer
 - npm (included with Node.js)
+- Python 3.10 or newer (for the chunking stage)
 
 Install dependencies from the repository root:
 
@@ -79,7 +80,41 @@ npm test
 npm run check
 ```
 
-The output is an intermediate ingestion artifact, not a vector database. It
+### Run the Python chunker
+
+Create an isolated environment and install the Python command from the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[test]'
+```
+
+Then read every Markdown/MDX file in `react-js-docs/` and write JSON Lines output:
+
+```bash
+chunk-react-docs
+# Equivalent module form:
+python -m react_docs_chunker.cli
+```
+
+The default output is `output/react-doc-chunks.jsonl`. Override the paths and token
+settings when experimenting with retrieval quality:
+
+```bash
+chunk-react-docs ./react-js-docs ./output/custom.jsonl \
+  --target-tokens 600 --max-tokens 900 --overlap-tokens 75
+pytest
+```
+
+Each line is a parent or child record with stable IDs, source provenance, heading
+breadcrumbs, an anchor, token count, and retrieval text. The recommended strategy is
+heading-aware parent/child chunking: keep a complete section as the parent, retrieve
+smaller 400–700-token children, preserve code with its explanation, and use 50–100
+tokens of overlap only when an oversized section must be divided. These are starting
+values; tune them using retrieval recall and citation accuracy for your application.
+
+The Node output is an intermediate ingestion artifact, not a vector database. It
 contains separate retrieval text and display Markdown, source provenance,
 classification, warnings, and deterministic content hashes. The remaining
 chunking and indexing stages are specified in
