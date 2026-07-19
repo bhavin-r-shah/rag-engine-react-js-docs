@@ -41,13 +41,57 @@ only after the download succeeds, and writes the resolved upstream commit to
 `react-js-docs/.react-docs-commit`. Files removed upstream are therefore also
 removed locally.
 
+## Local setup
+
+### Prerequisites
+
+- Node.js 20 or newer
+- npm (included with Node.js)
+
+Install dependencies from the repository root:
+
+```bash
+npm install
+```
+
+The ingestion implementation currently uses only Node.js built-in modules, so
+installation does not download third-party runtime packages; it verifies the
+package metadata and creates the local lockfile state.
+
+Run the implemented discovery, Markdown/MDX parsing, and normalization stages:
+
+```bash
+npm run ingest
+```
+
+The command reads `react-js-docs/` and writes normalized records to
+`output/normalized-documents.json`. Both paths can be overridden with positional
+arguments:
+
+```bash
+npm run ingest -- ./path/to/corpus ./path/to/output.json
+```
+
+Run the automated checks:
+
+```bash
+npm test
+npm run check
+```
+
+The output is an intermediate ingestion artifact, not a vector database. It
+contains separate retrieval text and display Markdown, source provenance,
+classification, warnings, and deterministic content hashes. The remaining
+chunking and indexing stages are specified in
+[`low-level-design.md`](low-level-design.md).
+
 ## Using the corpus in a RAG pipeline
 
-A typical ingestion pipeline should:
+A complete ingestion pipeline will:
 
 1. Discover `.md` and `.mdx` files directly under `react-js-docs/`.
-2. Parse front matter and headings, retaining the flattened filename as source
-   metadata.
+2. Parse front matter and headings into an AST, retaining the flattened filename
+   as source metadata.
 3. Split text along Markdown section boundaries, with a small overlap between
    chunks.
 4. Embed the chunks and upsert them into a vector store.
