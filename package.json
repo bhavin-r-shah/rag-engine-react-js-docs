@@ -1,0 +1,24 @@
+{
+  "name": "react-docs-rag-ingestion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Structure-aware ingestion pipeline for the React documentation RAG corpus",
+  "scripts": {
+    "ingest": "node src/cli.js",
+    "test": "node --test",
+    "check": "node --check src/cli.js && node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "mdast-util-mdx": "^3.0.0",
+    "mdast-util-to-markdown": "^2.1.2",
+    "remark-frontmatter": "^5.0.0",
+    "remark-mdx": "^3.1.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  }
+}
