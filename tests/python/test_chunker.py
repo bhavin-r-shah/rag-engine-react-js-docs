@@ -1,3 +1,10 @@
+"""Automated examples that verify the chunker behaves as documented.
+
+pytest discovers functions whose names begin with ``test_``. Each test builds a tiny
+temporary corpus, runs real chunking code, and uses ``assert`` to describe the expected
+result. pytest deletes ``tmp_path`` automatically after the test.
+"""
+
 import json
 
 import pytest
@@ -11,6 +18,7 @@ def word_count(text: str) -> int:
 
 
 def test_chunks_nested_headings_and_preserves_code(tmp_path):
+    """Titles, breadcrumbs, code, routes, URLs, and hashes survive processing."""
     corpus = tmp_path / "react-js-docs"
     corpus.mkdir()
     (corpus / "guide.md").write_text("""---
@@ -30,6 +38,7 @@ More details here.
 """, encoding="utf-8")
     output = tmp_path / "chunks.jsonl"
 
+    # Tiny limits force the sample through the splitting path without a huge fixture.
     chunk_corpus(corpus, output, word_count, target=30, maximum=40, overlap=3)
     rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
 
@@ -42,6 +51,7 @@ More details here.
 
 
 def test_discovers_markdown_case_insensitively_in_stable_order(tmp_path):
+    """Both .md and uppercase .MDX files are accepted and alphabetically ordered."""
     corpus = tmp_path / "react-js-docs"
     corpus.mkdir()
     (corpus / "b.MDX").write_text("## B\n\nsecond", encoding="utf-8")
@@ -56,11 +66,13 @@ def test_discovers_markdown_case_insensitively_in_stable_order(tmp_path):
 
 
 def test_rejects_invalid_size_configuration(tmp_path):
+    """A hard maximum smaller than the target is rejected with a clear exception."""
     with pytest.raises(ValueError):
         chunk_corpus(tmp_path, tmp_path / "out.jsonl", word_count, target=10, maximum=5)
 
 
 def test_fenced_heading_is_not_a_section_and_children_obey_limit(tmp_path):
+    """A '#' inside Python example code is not mistaken for a Markdown heading."""
     corpus = tmp_path / "react-js-docs"
     corpus.mkdir()
     (corpus / "code.md").write_text(

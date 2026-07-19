@@ -1,8 +1,10 @@
 [build-system]
+# setuptools turns the source directory below into an installable Python package.
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# This metadata is used by ``python -m pip install -e '.[test]'``.
 name = "react-docs-chunker"
 version = "1.0.0"
 description = "Structure-aware Markdown chunking for the React documentation corpus"
@@ -10,14 +12,18 @@ requires-python = ">=3.10"
 dependencies = ["tiktoken>=0.7"]
 
 [project.optional-dependencies]
+# The test extra installs pytest only for people who want to run automated checks.
 test = ["pytest>=8"]
 
 [project.scripts]
+# After installation, this creates the convenient ``chunk-react-docs`` command.
 chunk-react-docs = "react_docs_chunker.cli:main"
 
 [tool.setuptools.packages.find]
+# Application packages live here rather than directly in the repository root.
 where = ["python-src"]
 
 [tool.pytest.ini_options]
+# These settings let pytest import the package and find only the Python test folder.
 pythonpath = ["python-src"]
 testpaths = ["tests/python"]

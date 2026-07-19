@@ -4,7 +4,8 @@ This is the first file to edit when experimenting with chunk sizes. Command-line
 options can override the three numeric values for one run without changing this file.
 """
 
-# Every Markdown heading starts a semantic section. Small sections remain whole;
+# ``True`` and ``False`` are Python Boolean values. With this set to True, every
+# Markdown heading starts a semantic section. Small sections remain whole;
 # sections larger than TARGET_TOKENS are divided at safe Markdown block boundaries.
 CHUNK_BY_HEADING = True
 

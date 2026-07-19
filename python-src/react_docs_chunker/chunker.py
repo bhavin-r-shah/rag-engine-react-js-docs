@@ -1,11 +1,28 @@
-"""A small, structure-aware Markdown chunker.
+"""Read Markdown safely and create records suitable for later AI retrieval.
 
 The implementation deliberately avoids executing or rendering MDX. Documentation is
 untrusted input: this module only reads text and recognizes a few Markdown boundaries.
+
+The processing path is:
+
+1. discover Markdown and MDX files;
+2. read each file as UTF-8 text;
+3. remove its optional front matter and find its title;
+4. group text under headings and into complete Markdown blocks;
+5. pack blocks into token-limited child chunks; and
+6. serialize parent and child dictionaries as JSON Lines (JSONL).
+
+Functions whose names begin with an underscore are internal implementation helpers.
+They can still be tested, but application code should normally call ``chunk_corpus``
+or ``chunk_document`` instead.
 """
 
+# This future import lets type hints refer to modern types consistently on every
+# supported Python version. It must appear before ordinary imports.
 from __future__ import annotations
 
+# All three modules below are included with Python: hashlib creates stable checksums,
+# json creates output records, and re recognizes small Markdown text patterns.
 import hashlib
 import json
 import re
@@ -15,6 +32,8 @@ from typing import Callable
 
 from .config import CHUNK_BY_HEADING, MAX_TOKENS, OVERLAP_TOKENS, TARGET_TOKENS
 
+# Compiling regular expressions once is more efficient than rebuilding them for every
+# line. These expressions recognize ATX headings and simple scalar front-matter fields.
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 ANCHOR_RE = re.compile(r"\s*\{\/\*#?([\w-]+)\*\/\}\s*$")
 FRONTMATTER_TITLE_RE = re.compile(r"^title:\s*[\"']?(.*?)[\"']?\s*$", re.MULTILINE)
@@ -23,7 +42,12 @@ FRONTMATTER_META_RE = re.compile(r"^meta:\s*[\"']?(.*?)[\"']?\s*$", re.MULTILINE
 
 @dataclass(frozen=True)
 class Section:
-    """One heading and all Markdown blocks below it, up to the next heading."""
+    """Store one heading breadcrumb and the Markdown blocks belonging to it.
+
+    ``frozen=True`` prevents accidental modification after construction. A tuple is
+    used for the same reason: section structure should not change while chunks are
+    being created.
+    """
 
     headings: tuple[str, ...]
     anchor: str
@@ -32,6 +56,8 @@ class Section:
 
 def _stable_id(*parts: str) -> str:
     """Create an ID that remains stable when unrelated files are added or removed."""
+    # A null separator prevents ambiguous combinations: ("ab", "c") must not hash
+    # like ("a", "bc"). SHA-256 always returns the same result for the same bytes.
     payload = "\0".join(parts).encode("utf-8")
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
@@ -190,14 +216,19 @@ def _source_metadata(path: Path, corpus_root: Path, raw: str) -> dict[str, str]:
 
 
 def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], target: int, maximum: int, overlap: int) -> list[dict]:
-    """Read one document and return JSON-serializable parent and child records."""
+    """Read one file and return dictionaries that Python can serialize as JSON.
+
+    ``count`` is a function supplied by the caller. Passing a function into another
+    function is normal Python and lets production use tiktoken while tests use a tiny
+    offline word counter.
+    """
     raw = path.read_text(encoding="utf-8")
     body, frontmatter_title = _split_frontmatter(raw)
     fallback = path.stem.split("--")[-1].replace("-", " ").title()
     title = frontmatter_title or fallback
     metadata = _source_metadata(path, corpus_root, raw)
     document_id = _stable_id(metadata["sourcePath"])
-    records: list[dict] = []
+    records: list[dict] = []  # Start with an empty list and append each output record.
     # Heading chunking is the recommended default. Keeping this switch here makes
     # config.py truthful: setting it to False treats the document as one section,
     # after which the same safe block and token rules still create child chunks.
@@ -231,12 +262,19 @@ def chunk_corpus(
     maximum: int = MAX_TOKENS,
     overlap: int = OVERLAP_TOKENS,
 ) -> int:
-    """Chunk every Markdown/MDX file deterministically and write newline-delimited JSON."""
+    """Chunk all supported files and return the number of records written.
+
+    JSONL writes one JSON object followed by a newline. Unlike one enormous JSON array,
+    downstream programs can read it one record at a time without loading everything
+    into memory.
+    """
     if not (0 <= overlap < target <= maximum):
         raise ValueError("expected 0 <= overlap < target <= maximum")
     # rglob also supports a future nested corpus, while sorting makes two identical
     # runs byte-for-byte reproducible regardless of filesystem traversal order.
     files = sorted(path for path in corpus.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in {".md", ".mdx"})
+    # This nested list comprehension means: process each file, then place every record
+    # returned for that file into one flat list in deterministic file order.
     records = [record for path in files for record in chunk_document(path, corpus, count, target, maximum, overlap)]
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
