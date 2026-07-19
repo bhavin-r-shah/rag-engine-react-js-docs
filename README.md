@@ -3,24 +3,23 @@
 This repository is a source corpus for building a retrieval-augmented generation
 (RAG) application over the official React documentation. The documentation is
 mirrored from [`reactjs/react.dev/src/content`](https://github.com/reactjs/react.dev/tree/main/src/content)
-into [`docs/`](docs/) while preserving the upstream directory structure.
+into [`react-js-docs/`](react-js-docs/) as a flat collection.
 
 ## Corpus layout
 
 Only Markdown source files (`.md` and `.mdx`, matched case-insensitively) are
-included. Keeping the original paths makes it possible to retain useful section
-and document metadata when the files are chunked for a vector store.
+included. Every file is placed directly in `react-js-docs/`; upstream path
+separators are replaced with `--` so files with the same basename remain unique.
 
 ```text
-docs/
-├── blog/
-├── community/
-├── learn/
-└── reference/
+react-js-docs/
+├── index.md
+├── learn--your-first-component.md
+└── reference--react--useState.md
 ```
 
-The exact set of directories is controlled by upstream and can change when the
-corpus is refreshed.
+The exact set of files is controlled by upstream and can change when the corpus
+is refreshed.
 
 ## Refresh the documentation
 
@@ -37,17 +36,17 @@ a tag, branch, or commit for a reproducible corpus:
 REACT_DOCS_REF=v19.1.0 ./scripts/sync-react-docs.sh
 ```
 
-The refresh is atomic: it builds a temporary copy, replaces `docs/` only after
-the download succeeds, and writes the resolved upstream commit to
-`docs/.react-docs-commit`. Files removed upstream are therefore also removed
-locally.
+The refresh is atomic: it builds a temporary copy, replaces `react-js-docs/`
+only after the download succeeds, and writes the resolved upstream commit to
+`react-js-docs/.react-docs-commit`. Files removed upstream are therefore also
+removed locally.
 
 ## Using the corpus in a RAG pipeline
 
 A typical ingestion pipeline should:
 
-1. Recursively discover `.md` and `.mdx` files under `docs/`.
-2. Parse front matter and headings, retaining the relative file path as source
+1. Discover `.md` and `.mdx` files directly under `react-js-docs/`.
+2. Parse front matter and headings, retaining the flattened filename as source
    metadata.
 3. Split text along Markdown section boundaries, with a small overlap between
    chunks.

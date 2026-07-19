@@ -11,7 +11,7 @@ temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/react-docs.XXXXXX")"
 trap 'rm -rf "$temporary_directory"' EXIT
 
 checkout_directory="$temporary_directory/react.dev"
-staged_docs_directory="$temporary_directory/docs"
+staged_docs_directory="$temporary_directory/react-js-docs"
 
 echo "Fetching React documentation at ${REACT_DOCS_REF}..."
 git init --quiet "$checkout_directory"
@@ -25,8 +25,14 @@ source_directory="$checkout_directory/$UPSTREAM_CONTENT_PATH"
 
 while IFS= read -r -d '' source_file; do
   relative_path="${source_file#"$source_directory/"}"
-  destination_file="$staged_docs_directory/$relative_path"
-  mkdir -p "$(dirname "$destination_file")"
+  flattened_filename="${relative_path//\//--}"
+  destination_file="$staged_docs_directory/$flattened_filename"
+
+  if [[ -e "$destination_file" ]]; then
+    echo "Flattened filename collision: $relative_path maps to $flattened_filename" >&2
+    exit 1
+  fi
+
   cp "$source_file" "$destination_file"
 done < <(find "$source_directory" -type f \( -iname '*.md' -o -iname '*.mdx' \) -print0)
 
@@ -38,7 +44,7 @@ fi
 
 git -C "$checkout_directory" rev-parse HEAD > "$staged_docs_directory/.react-docs-commit"
 
-rm -rf "$repository_root/docs"
-mv "$staged_docs_directory" "$repository_root/docs"
+rm -rf "$repository_root/react-js-docs"
+mv "$staged_docs_directory" "$repository_root/react-js-docs"
 
-echo "Copied $file_count Markdown files into $repository_root/docs"
+echo "Copied $file_count Markdown files into $repository_root/react-js-docs"
