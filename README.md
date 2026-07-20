@@ -197,5 +197,30 @@ The Python command prepares retrieval chunks, but it does not yet create embeddi
 store vectors, search the chunks, or call an AI model. Those later RAG stages are
 described in [`low-level-design.md`](low-level-design.md).
 
-The upstream documentation remains subject to the licensing terms in the React
-repository. Review those terms before redistributing or deploying the corpus.
+## React documentation license and attribution
+
+The files in [`react-js-docs/`](react-js-docs/) contain material copied from the
+official [React documentation](https://react.dev/) and its
+[`reactjs/react.dev`](https://github.com/reactjs/react.dev) source repository.
+
+The React documentation is:
+
+- **Copyright © Meta Platforms, Inc. and affiliates.**
+- Licensed under the
+  [Creative Commons Attribution 4.0 International license (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+- Governed by React's upstream
+  [`LICENSE-DOCS.md`](https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md).
+
+This repository redistributes the documentation as flattened Markdown filenames and
+may transform that material into parent and child JSONL chunks for retrieval. These
+are changes from the upstream presentation. The original documentation and its
+license notices remain available at the links above.
+
+CC BY 4.0 allows sharing and adaptation when its terms are followed, including giving
+appropriate credit, linking to the license, and indicating whether changes were made.
+The attribution above must be retained with copies or adaptations of the React
+documentation. It does not imply that Meta or the React team endorses this project.
+
+This attribution applies to the React documentation content. It does not, by itself,
+set the license for the original Python code or other original material in this
+repository.
