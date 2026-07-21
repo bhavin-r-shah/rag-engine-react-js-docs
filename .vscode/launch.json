@@ -23,6 +23,17 @@
       "env": {
         "PYTHONPATH": "${workspaceFolder}/python-src"
       }
+    },
+    {
+      "name": "Search",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "react_docs_chunker.search.cli",
+      "args": ["how does useEffect cleanup work", "--mode", "all"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/python-src"
+      }
     }
   ]
 }

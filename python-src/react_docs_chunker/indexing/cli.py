@@ -9,37 +9,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from react_docs_chunker._cli_utils import build_embedder, build_vector_store
 from react_docs_chunker.config import (
-    CHROMA_COLLECTION,
-    CHROMA_DB_DIR,
     EMBED_CACHE_PATH,
     EMBEDDING_BATCH_SIZE,
     JSONL_PATH,
 )
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.indexing.indexer import run_indexing
-
-
-def _build_embedder(name: str):
-    if name == "local":
-        from react_docs_chunker.embed.local_embedder import SentenceTransformerEmbedder
-        return SentenceTransformerEmbedder()
-    if name == "openai":
-        from react_docs_chunker.embed.openai_embedder import OpenAIEmbedder
-        return OpenAIEmbedder()
-    raise ValueError(f"Unknown embedder: {name}")
-
-
-def _build_vector_store(name: str, embedder):
-    if name == "chroma":
-        from react_docs_chunker.indexing.vector_store import ChromaVectorStore
-        return ChromaVectorStore(
-            model_id=embedder.model_id,
-            dimensions=embedder.dimensions,
-            db_dir=CHROMA_DB_DIR,
-            collection_name=CHROMA_COLLECTION,
-        )
-    raise ValueError(f"Unknown vector-db: {name}")
 
 
 def main() -> None:
@@ -66,9 +43,9 @@ def main() -> None:
         )
         print("Chunking complete.\n")
 
-    embedder = _build_embedder(args.embedder)
+    embedder = build_embedder(args.embedder)
     cache = EmbedCache(EMBED_CACHE_PATH)
-    store = _build_vector_store(args.vector_db, embedder)
+    store = build_vector_store(args.vector_db, embedder)
 
     stats = run_indexing(args.jsonl, embedder, cache, store, batch_size=EMBEDDING_BATCH_SIZE)
 
