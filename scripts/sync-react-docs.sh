@@ -4,6 +4,7 @@ set -euo pipefail
 
 readonly UPSTREAM_REPOSITORY="https://github.com/reactjs/react.dev.git"
 readonly UPSTREAM_CONTENT_PATH="src/content"
+readonly UPSTREAM_DOCS_LICENSE="LICENSE-DOCS.md"
 readonly REACT_DOCS_REF="${REACT_DOCS_REF:-main}"
 
 repository_root="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
@@ -16,7 +17,8 @@ staged_docs_directory="$temporary_directory/react-js-docs"
 echo "Fetching React documentation at ${REACT_DOCS_REF}..."
 git init --quiet "$checkout_directory"
 git -C "$checkout_directory" remote add origin "$UPSTREAM_REPOSITORY"
-git -C "$checkout_directory" sparse-checkout set "$UPSTREAM_CONTENT_PATH"
+git -C "$checkout_directory" sparse-checkout set --no-cone \
+  "/$UPSTREAM_CONTENT_PATH/" "/$UPSTREAM_DOCS_LICENSE"
 git -C "$checkout_directory" fetch --quiet --depth 1 --filter=blob:none origin "$REACT_DOCS_REF"
 git -C "$checkout_directory" checkout --quiet --detach FETCH_HEAD
 
@@ -44,7 +46,14 @@ fi
 
 git -C "$checkout_directory" rev-parse HEAD > "$staged_docs_directory/.react-docs-commit"
 
+# Keep the exact upstream documentation license with this repository without placing
+# it inside the chunker's Markdown corpus. Stage it first so a missing license fails
+# before the existing corpus is replaced.
+staged_license="$temporary_directory/LICENSE-REACT-DOCS.md"
+cp "$checkout_directory/$UPSTREAM_DOCS_LICENSE" "$staged_license"
+
 rm -rf "$repository_root/react-js-docs"
 mv "$staged_docs_directory" "$repository_root/react-js-docs"
+mv "$staged_license" "$repository_root/LICENSE-REACT-DOCS.md"
 
 echo "Copied $file_count Markdown files into $repository_root/react-js-docs"

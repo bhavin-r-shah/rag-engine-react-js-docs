@@ -5,6 +5,13 @@
 > and development, is not ready for production, and should not be used as a public
 > service or relied on by external users.
 
+> [!IMPORTANT]
+> **No permission is granted to use or distribute this project.** The repository
+> owner's original code and material are all rights reserved and are provided only for
+> the owner's personal learning and development. See [`LICENSE`](LICENSE). Third-party
+> React documentation remains governed by its own license; see
+> [`LICENSE-REACT-DOCS.md`](LICENSE-REACT-DOCS.md).
+
 This project turns the Markdown files from the official React documentation into
 small JSON records called **chunks**. A future AI search or retrieval-augmented
 generation (RAG) application can search these chunks and give the relevant text to
@@ -197,5 +204,41 @@ The Python command prepares retrieval chunks, but it does not yet create embeddi
 store vectors, search the chunks, or call an AI model. Those later RAG stages are
 described in [`low-level-design.md`](low-level-design.md).
 
-The upstream documentation remains subject to the licensing terms in the React
-repository. Review those terms before redistributing or deploying the corpus.
+## React documentation license and attribution
+
+The files in [`react-js-docs/`](react-js-docs/) contain material copied from the
+official [React documentation](https://react.dev/) and its
+[`reactjs/react.dev`](https://github.com/reactjs/react.dev) source repository.
+
+The React documentation is:
+
+- **Copyright © Meta Platforms, Inc. and affiliates.**
+- Licensed under the
+  [Creative Commons Attribution 4.0 International license (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+- Governed by React's upstream
+  [`LICENSE-DOCS.md`](https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md).
+- Documented locally in
+  [`LICENSE-REACT-DOCS.md`](LICENSE-REACT-DOCS.md) so the attribution remains available
+  with this repository.
+
+This repository redistributes the documentation as flattened Markdown filenames and
+may transform that material into parent and child JSONL chunks for retrieval. These
+are changes from the upstream presentation. The original documentation and its
+license notices remain available at the links above.
+
+CC BY 4.0 allows sharing and adaptation when its terms are followed, including giving
+appropriate credit, linking to the license, and indicating whether changes were made.
+The attribution above must be retained with copies or adaptations of the React
+documentation. It does not imply that Meta or the React team endorses this project.
+
+This attribution applies to the React documentation content. It does not, by itself,
+set the license for the original Python code or other original material in this
+repository. The repository owner's original material is all rights reserved under the
+repository-level [`LICENSE`](LICENSE); no permission is granted for anyone else to
+use, copy, modify, distribute, deploy, or host it.
+
+The repository-level restriction cannot remove rights that Meta or another third
+party grants directly for its own material. In particular, the React documentation
+continues to be available under CC BY 4.0 when that license's conditions are followed.
+If the goal is to prevent all third-party access to the project as a whole, keep the
+repository private and do not publish generated chunks or copies of the corpus.
