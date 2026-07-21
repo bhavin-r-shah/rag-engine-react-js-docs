@@ -14,12 +14,13 @@ dependencies = ["tiktoken>=0.7"]
 [project.optional-dependencies]
 # The test extra installs pytest only for people who want to run automated checks.
 test = ["pytest>=8"]
-embed = ["sentence-transformers>=3"]
+embed = ["sentence-transformers>=3", "chromadb>=0.5"]
 embed-openai = ["openai>=1", "tenacity>=8"]
 
 [project.scripts]
 # After installation, this creates the convenient ``chunk-react-docs`` command.
 chunk-react-docs = "react_docs_chunker.cli:main"
+index-react-docs = "react_docs_chunker.indexing.cli:main"
 
 [tool.setuptools.packages.find]
 # Application packages live here rather than directly in the repository root.
