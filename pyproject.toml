@@ -8,12 +8,14 @@ build-backend = "setuptools.build_meta"
 name = "react-docs-chunker"
 version = "1.0.0"
 description = "Structure-aware Markdown chunking for the React documentation corpus"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = ["tiktoken>=0.7"]
 
 [project.optional-dependencies]
 # The test extra installs pytest only for people who want to run automated checks.
 test = ["pytest>=8"]
+embed = ["sentence-transformers>=3"]
+embed-openai = ["openai>=1", "tenacity>=8"]
 
 [project.scripts]
 # After installation, this creates the convenient ``chunk-react-docs`` command.
