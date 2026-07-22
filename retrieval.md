@@ -2,48 +2,36 @@
 
 ## Responsibility and status
 
-Retrieval will turn a validated user search query into ranked, traceable evidence for
-answer generation. Dense search, lexical search, fusion, reranking, and parent hydration
-are all **proposed** and are not implemented in the current Python package.
+Retrieval finds the child chunks most relevant to a query. PR #8 implements three
+command-line modes: dense, BM25, and hybrid. Model reranking and parent hydration are
+not implemented.
 
-## Proposed retrieval pipeline
+## Implemented search methods
 
-1. Accept normalized query text and optional filters from the
-   [user-query stage](user-query.md).
-2. Generate dense candidates from the query embedding against the compatible child
-   vector index.
-3. Generate lexical/BM25 candidates for exact identifiers, props, error numbers, and
-   phrases.
-4. Apply allowed filters such as route, document type, heading path, content kind, or
-   publication date in candidate generation where supported.
-5. Fuse dense and lexical rankings using a configured, evaluation-backed algorithm
-   such as reciprocal-rank fusion. Do not compare raw scores from unlike systems as if
-   they shared a scale.
-6. Optionally rerank a bounded candidate set with a provider-neutral reranker.
-7. Deduplicate by child ID, control repeated evidence from the same parent, and hydrate
-   selected parents when broader section context is required.
-8. Return ordered evidence with child text, parent content when requested, source URL,
-   route, title, heading path, anchor, scores, and retrieval-method diagnostics.
+- **Dense search** embeds the query with the selected provider and asks ChromaDB for
+  the nearest child vectors. It is useful when the query and document express a
+  similar idea with different words.
+- **BM25 search** lowercases and whitespace-splits every child from JSONL, then ranks
+  exact-word matches with `rank-bm25`. Its index exists only for the current search
+  process.
+- **Hybrid search** fetches three times the requested result count from dense and
+  BM25, then combines their ranks with Reciprocal Rank Fusion (RRF). A chunk receives
+  credit from either list and more credit when both methods rank it highly.
 
-Candidate counts, fusion constants, metadata boosts, parent diversity, and reranking
-depth are configuration—not hard-coded assumptions.
+The implementations are in [`engine.py`](python-src/react_docs_chunker/search/engine.py)
+and [`bm25.py`](python-src/react_docs_chunker/search/bm25.py).
 
-## Citation and failure contract
+## Run retrieval
 
-Every result must retain a resolvable source URL and enough heading/anchor metadata to
-construct a section-level citation. Missing provenance is a validation failure, not a
-reason to invent a citation. If one retrieval backend is temporarily unavailable, a
-documented degraded mode may use the other backend and label telemetry accordingly;
-if trustworthy evidence is insufficient, the query layer must decline to fabricate an
-answer.
+```bash
+python -m react_docs_chunker.search.cli "How does effect cleanup work?" --mode hybrid --n 5
+```
 
-## Evaluation
+Use `--mode dense`, `--mode bm25`, or `--mode all` to compare methods. Dense and hybrid
+modes require a previously built Chroma index and the same embedder used to build it.
+BM25 mode needs only the JSONL chunks.
 
-Maintain a version-controlled golden dataset covering conceptual learning questions,
-exact API lookups, code examples, warnings/errors, React Server Components,
-version-sensitive blog facts, and similar identifiers requiring disambiguation. Each
-case records acceptable routes, anchors, and expected facts.
-
-Compare dense-only, lexical-only, hybrid, and reranked variants using recall at K,
-mean reciprocal rank, section-level citation accuracy, latency, and cost. Use these
-results to select chunk limits and retrieval configuration.
+The CLI prints rank, route, score, and the first 120 characters of each child. Results
+retain source metadata internally, but the current display is not a complete citation
+or generated answer. Query filters, model reranking, parent-section hydration,
+evaluation thresholds, and degraded-backend handling remain proposed improvements.

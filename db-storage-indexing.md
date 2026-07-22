@@ -2,47 +2,40 @@
 
 ## Responsibility and status
 
-This stage will persist records and expose complementary semantic and exact-match
-indexes. It is **proposed**. The only implemented storage is newline-delimited JSON
-written by [`chunk_corpus`](python-src/react_docs_chunker/chunker.py#L257-L280); the
-repository does not currently connect to a vector database or search engine.
+Indexing makes child chunks searchable by saving their embeddings and metadata in a
+vector database. PR #8 implements persistent **ChromaDB** storage. The JSONL file
+remains the source for parent records and for the BM25 keyword index.
 
-## Proposed logical records
+## Run indexing
 
-- **Documents:** document ID, source path/URL, route, type, checksum, and pipeline
-  version.
-- **Parents:** parent chunk ID, document ID, complete section content, heading path,
-  anchor, content kind, and provenance.
-- **Children:** child chunk ID, parent ID, retrieval text, token count, metadata, and
-  embedding compatibility fields.
-- **Manifest:** source-to-record membership, schema and pipeline versions, embedding
-  model/dimensions, namespace, and successful ingestion time.
+```bash
+python -m react_docs_chunker.indexing.cli --embedder local --vector-db chroma
+```
 
-Stable IDs are primary keys. Writes are idempotent upserts; replacing a changed
-document also deletes old chunk IDs absent from its new manifest. Deleting a source
-removes its children, parents, and document record without affecting unrelated files.
+If `output/react-doc-chunks.jsonl` does not exist, this command runs the chunker first.
+It then embeds child records and upserts them by stable `chunkId`. An **upsert** means
+“insert a new ID, or update the existing ID,” so rerunning the command does not create
+a second copy of the same chunk.
 
-## Proposed indexes
+## What ChromaDB stores
 
-Index child vectors for dense semantic similarity and child text in a lexical/BM25
-index for exact API names, props, error numbers, and phrases. Index route, document
-type, heading path, anchor, content kind, and publication date where available as
-filterable metadata. Parent bodies may be stored outside the high-cardinality search
-index but must resolve efficiently by `parentId`.
+[`ChromaVectorStore`](python-src/react_docs_chunker/indexing/vector_store.py) persists
+the `react_docs` collection under `output/chroma_db/`. Each entry contains:
 
-The [retrieval stage](retrieval.md) queries both child indexes, fuses their candidates,
-and hydrates parent content only after ranking.
+- the child `chunkId`;
+- its embedding and searchable text; and
+- metadata such as parent ID, route, document type, title, anchor, content kind, token
+  count, source URL, and source path.
 
-## Atomic publication
+The collection also records the embedding model ID and dimensions. Opening it with an
+incompatible model or vector size raises an error instead of producing misleading
+search results. Delete `output/chroma_db/` and index again when intentionally changing
+models.
 
-Build each run in a new staging namespace:
+## Current boundaries
 
-1. Upsert all staged documents, parents, children, vectors, and lexical fields.
-2. Verify counts, unique IDs, parent references, vector presence/dimensions, metadata,
-   and manifest membership.
-3. Mark the manifest complete only after all validation succeeds.
-4. Atomically switch the active alias or namespace pointer to the staged index.
-5. Retain or garbage-collect the previous namespace according to rollback policy.
-
-No failed or partially written namespace may become active. Readers continue using the
-previously validated namespace throughout staging.
+Only ChromaDB is selectable. Dense vectors are persistent, but BM25 is rebuilt in
+memory from JSONL whenever keyword or hybrid search starts. Parent records are not
+written to ChromaDB, and the CLI currently displays child previews rather than loading
+the complete parent section. Staging namespaces, atomic promotion, deletion of stale
+IDs, and production manifests are not implemented.

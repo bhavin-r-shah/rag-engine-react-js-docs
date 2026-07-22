@@ -2,94 +2,77 @@
 
 ## Purpose and scope
 
-This design describes an end-to-end retrieval-augmented generation (RAG) system for
-the Markdown and MDX files in `react-js-docs/`. The pipeline must preserve titles,
-heading hierarchy, React API identifiers, prose, examples, and provenance instead of
-splitting source files at arbitrary character boundaries.
+This repository implements the retrieval portion of a small RAG pipeline for the
+Markdown and MDX files in `react-js-docs/`. It preserves headings and provenance,
+creates searchable child chunks, embeds them, stores their vectors, and retrieves
+relevant text. It does not yet generate an AI answer.
 
-Only deterministic document ingestion and structure-aware parent/child chunking are
-implemented today. Embedding, database indexing, retrieval, and answer generation are
-designs for subsequent milestones; their documents label proposed behavior explicitly.
-
-## End-to-end flow
+## Implemented end-to-end flow
 
 ```text
 React Markdown/MDX
         |
         v
-ingestion -> chunking -> embedding -> database storage and indexing
-                                                   |
-                                                   v
-user query -> retrieval --------------------> grounded answer + citations
+ingestion -> heading-aware parent/child chunking -> JSONL
+                                                        |
+                                                        v
+                                      embedding -> ChromaDB index
+                                                        |
+user terminal query -> dense search + BM25 -> RRF ranking -> chunk previews
 ```
 
-| Stage | Responsibility | Input | Output | Status |
-| --- | --- | --- | --- | --- |
-| [Ingestion](ingestion.md) | Discover files, read safe text, derive provenance, and serialize records. | `react-js-docs/**/*.md(x)` | Deterministic document metadata and JSONL records | **Implemented** for discovery, metadata, and JSONL; incremental ingestion is proposed. |
-| [Chunking](chunking.md) | Split each document first by heading section and then oversized sections by block/token limits. | Document body, title, metadata | Section parents and retrieval children | **Implemented** in Python. |
-| [Embedding](embedding.md) | Convert retrieval children into model-compatible dense vectors. | Child retrieval text | Versioned vectors and embedding metadata | **Proposed**. |
-| [Database storage and indexing](db-storage-indexing.md) | Store parents/children and build vector plus lexical indexes atomically. | Records, vectors, manifest | Searchable active index | **Proposed**; JSONL output is the only current storage. |
-| [Retrieval](retrieval.md) | Find, fuse, optionally rerank, and hydrate relevant evidence. | Validated search query | Ranked children, parents, and citations | **Proposed**. |
-| [User query](user-query.md) | Orchestrate query handling, context construction, grounded generation, and response telemetry. | User question | Answer with source citations | **Proposed**. |
+| Stage | Input | Output | Status |
+| --- | --- | --- | --- |
+| [Ingestion](ingestion.md) | `react-js-docs/**/*.md(x)` | Safe text and source metadata | **Implemented** |
+| [Chunking](chunking.md) | Documents | JSONL parents and children | **Implemented** |
+| [Embedding](embedding.md) | Child text | Local or OpenAI vectors and SQLite cache | **Implemented** |
+| [Indexing](db-storage-indexing.md) | Children and vectors | Persistent ChromaDB collection | **Implemented** for ChromaDB |
+| [Retrieval](retrieval.md) | Query | Dense, BM25, or hybrid ranked children | **Implemented** |
+| [User query](user-query.md) | Terminal query | Routes, scores, and text previews | **Implemented** as a CLI only |
+| Answer generation | Retrieved evidence | Grounded answer and citations | **Not implemented** |
 
-## Implemented Python architecture
+## Commands and data flow
 
-```text
-react-js-docs/**/*.md(x)
-        |
-        v
-safe, deterministic discovery and metadata derivation
-        |
-        v
-front-matter, fence, block, and heading scanner
-        |
-        v
-heading sections (parents)
-        |
-        v
-token-bounded retrieval chunks (children)
-        |
-        v
-output/react-doc-chunks.jsonl
-```
+1. `python -m react_docs_chunker.cli` writes
+   `output/react-doc-chunks.jsonl`.
+2. `python -m react_docs_chunker.indexing.cli --embedder local` reads children,
+   reuses or writes `output/embed_cache.db`, and upserts vectors plus metadata into
+   `output/chroma_db/`.
+3. `python -m react_docs_chunker.search.cli "query" --mode hybrid` embeds the query,
+   searches ChromaDB, builds an in-memory BM25 index from JSONL, fuses the two rankings,
+   and prints previews.
 
-The installed `chunk-react-docs` command and `python -m react_docs_chunker.cli` are
-equivalent. Both use `python-src/react_docs_chunker/`; there is no Node.js ingestion
-runtime.
+Console scripts `chunk-react-docs`, `index-react-docs`, and `search-react-docs` are
+installed equivalents. All application code is Python; this repository does not run a
+Node.js server or React UI.
 
-## Implementation boundary
+## Implemented components
 
-The Python package currently implements discovery, safe text loading, limited
-front-matter parsing, metadata and stable-ID derivation, heading-aware chunking,
-model-token counting, and JSONL serialization. It does **not** generate embeddings,
-write a vector or lexical database, maintain an incremental manifest, retrieve or
-rerank evidence, or answer user questions.
+- `chunker.py` handles discovery, metadata, stable IDs, heading-aware sections,
+  token-bounded children, and JSONL serialization.
+- `embed/` provides a provider interface, Sentence Transformers and OpenAI adapters,
+  batching, and a model-and-text-scoped SQLite cache.
+- `indexing/` coordinates embedding and idempotent child upserts. Its ChromaDB adapter
+  checks collection model identity and vector dimensions.
+- `search/` implements query embedding, Chroma dense retrieval, in-memory BM25, and
+  reciprocal-rank fusion.
 
-This boundary is intentional: later integrations remain behind the contracts in the
-linked stage designs, allowing providers and storage engines to change without
-rewriting the structure-aware ingestion core.
+## Important current boundaries
 
-## Cross-stage contracts
+- ChromaDB is the only vector database implementation.
+- BM25 is rebuilt from JSONL for every search process rather than persisted.
+- ChromaDB stores child text and metadata; parents remain in JSONL and are not hydrated
+  into CLI results.
+- Search output is evidence, not a synthesized answer or complete citation display.
+- There is no web UI, HTTP API, authentication, query filtering, model reranker,
+  incremental manifest, stale-record deletion, staging namespace, or atomic index
+  promotion.
 
-- A child is the searchable unit; its `parentId` resolves to the complete semantic
-  section used for display or expanded context.
-- Stable document and chunk IDs are the upsert, cache, and deletion keys.
-- Every searchable record retains source path, URL, route, checksum, title, heading
-  path, anchor, content kind, token count, and text for filtering and citations.
-- Embedding model identity and vector dimensions are part of index compatibility.
-- Only a completely validated staged index may replace the active index.
-- Retrieval returns evidence and provenance; query orchestration is responsible for
-  passing that evidence to a generator and rendering citations.
+## Cross-stage rules
 
-## Operational and security principles
-
-- Treat the corpus and user input as untrusted; never execute source content.
-- Keep transformations deterministic, idempotent, and independently testable.
-- Fail explicitly on ambiguous identity or corrupt provenance; warn on recoverable
-  syntax.
-- Keep model, embedding, and database integrations behind interfaces.
-- Version schemas, pipeline behavior, manifests, models, indexes, and evaluations.
-- Never log credentials, vectors, unnecessary complete documents, or sensitive query
-  content.
-- Preserve the previously serving corpus until a replacement passes every quality
-  gate.
+- A child is the searchable unit; its `parentId` identifies its complete section.
+- Stable `chunkId` values are both cache/index identities and idempotent upsert keys.
+- Search must use the same embedding model as its Chroma collection.
+- Provenance metadata travels with each indexed child so future interfaces can create
+  links and citations.
+- Source Markdown, examples, and user queries are data and must never be executed.

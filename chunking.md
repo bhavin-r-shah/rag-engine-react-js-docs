@@ -14,7 +14,9 @@ so the application can load the complete section after it finds a child.
 
 This two-step strategy is **implemented** in
 [`chunker.py`](python-src/react_docs_chunker/chunker.py): first find sections from
-headings, then split a section only when it is too large.
+headings, then split a section only when it is too large. The resulting child
+records are now embedded and indexed by the implemented downstream pipeline; parent
+records remain in JSONL for future expanded-context use.
 
 ## Beginner glossary
 

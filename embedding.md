@@ -2,41 +2,46 @@
 
 ## Responsibility and status
 
-The embedding stage will convert retrieval-child text into dense vectors for semantic
-search. It is **proposed**: this repository currently produces JSONL records but has
-no embedding client or model integration.
+An **embedding** is a list of numbers that represents a piece of text. Texts with
+similar meanings should have nearby embeddings. PR #8 implements this stage for child
+chunks; parent sections are not embedded.
 
-## Proposed contract
+## Implemented providers
 
-An embedding provider adapter accepts a batch of `{chunkId, text}` items plus an
-explicit model identifier and returns `{chunkId, vector, model, dimensions}`. The
-adapter must:
+Both providers follow the `EmbeddingProvider` interface in
+[`embedder.py`](python-src/react_docs_chunker/embed/embedder.py):
 
-- batch requests within provider item and token limits;
-- apply bounded retries with exponential backoff and jitter to transient failures;
-- honor provider rate limits without reordering identity mappings;
-- reject missing vectors, non-finite values, and unexpected dimensions;
-- expose request counts, token volume, latency, retries, and failures without logging
-  raw vectors or unnecessary text.
+- `local` uses Sentence Transformers and defaults to `all-mpnet-base-v2` (768
+  dimensions). It needs no API key, but downloads the model on first use.
+- `openai` uses the OpenAI embeddings API and defaults to
+  `text-embedding-3-small`. It reads `OPENAI_API_KEY`, batches requests, and retries a
+  failed API call up to five times with exponential waiting.
 
-Providers remain behind this interface so indexing does not depend on a particular
-SDK. Authentication comes from runtime secret configuration and is never persisted in
-records or logs.
+The index and search commands must use the same provider and model because vectors
+from different models are not comparable.
 
-## Cache and compatibility
+## How embedding runs
 
-Cache embeddings by the embedding-model identifier plus a normalized-content hash.
-Normalization must be deterministic and versioned; changing it invalidates the cache.
-Store model identifier and vector dimensions with every staged index and never mix
-incompatible vectors in one vector field.
+Run embedding as part of indexing:
 
-Only child retrieval text is embedded by default. Parent content remains addressable
-through `parentId` for expanded context. Stable `chunkId` values are the idempotent
-upsert keys shared with [database storage and indexing](db-storage-indexing.md).
+```bash
+python -m react_docs_chunker.indexing.cli --embedder local
+```
 
-## Failure behavior
+[`run_indexing`](python-src/react_docs_chunker/indexing/indexer.py) reads JSONL child
+records in batches. For each child it checks the cache, embeds cache misses, saves new
+vectors, and sends all records and vectors to the vector store.
 
-A partial embedding batch must not be promoted. Failed items may be retried, but the
-staged corpus passes validation only when every searchable child has exactly one
-compatible vector. Permanent provider or validation failures leave the active index
-unchanged.
+## Cache
+
+[`EmbedCache`](python-src/react_docs_chunker/embed/cache.py) stores vectors in the
+SQLite file `output/embed_cache.db`. Its key is a SHA-256 hash of both model ID and
+exact text. Therefore:
+
+- the same model and text can reuse an old vector;
+- changed text creates a new cache entry; and
+- different models cannot accidentally share an entry.
+
+The CLI reports cache hits and newly embedded children after indexing. The current
+implementation does not validate non-finite vector values or atomically publish a
+fully staged embedding run; those remain future hardening work.

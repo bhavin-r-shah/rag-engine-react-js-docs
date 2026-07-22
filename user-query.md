@@ -1,48 +1,38 @@
-# User query and answer-generation design
+# User query design
 
 ## Responsibility and status
 
-The user-query stage will validate a question, obtain evidence, construct grounded
-model context, and return an answer with citations. This entire stage is **proposed**;
-the repository does not currently expose a query API or invoke a generative model.
+PR #8 implements a **terminal search query**, not a full chatbot question-and-answer
+stage. A user supplies a non-empty positional string to the search CLI, which retrieves
+and prints ranked child-chunk previews.
 
-## Proposed request flow
+## Implemented flow
 
-1. **Receive and validate:** require non-empty text, enforce length and request limits,
-   authenticate where applicable, and treat all input as untrusted data.
-2. **Normalize:** apply conservative Unicode/whitespace normalization without changing
-   case-sensitive API identifiers. Optional intent detection may derive filters, but
-   must retain the original question.
-3. **Retrieve:** call the provider-neutral [retrieval contract](retrieval.md) with the
-   validated question and permitted filters.
-4. **Assemble context:** select evidence within the generator token budget, preserve
-   code fences and breadcrumbs, deduplicate repeated parent material, and assign stable
-   citation labels tied to record IDs and URLs.
-5. **Generate:** instruct a model to answer only from supplied evidence, distinguish
-   version-sensitive facts, cite supporting sections, and say when evidence is
-   insufficient. Model integration remains behind an interface.
-6. **Validate response:** ensure emitted citations resolve to supplied records and
-   remove or reject unsupported citation identifiers. Never execute generated or
-   retrieved code.
-7. **Return:** provide the answer, citations, and safe request metadata; stream only if
-   citation validation remains possible before final completion.
+1. Activate the project virtual environment.
+2. Enter a quoted query, for example:
 
-## Context and citation shape
+   ```bash
+   python -m react_docs_chunker.search.cli "When should I use useMemo?" --mode hybrid --n 5
+   ```
 
-Each context item should include a citation ID, child text, optional expanded parent
-text, title, heading path, source URL, anchor, and content kind. Citation rendering
-uses only this map; the model cannot introduce an arbitrary URL. Context ordering
-follows retrieval rank while enforcing configurable source and parent diversity.
+3. `argparse` reads the query, mode, provider, vector database, JSONL path, and result
+   count.
+4. Dense or hybrid mode embeds and caches the query, then searches ChromaDB. BM25 or
+   hybrid mode builds a keyword index from JSONL.
+5. The CLI prints ranked routes, scores, and short text previews.
 
-## Failure behavior and observability
+Quotes keep a multi-word question as one command-line argument. The `--n` value
+controls the number of displayed results. The query embedding cache uses the same
+SQLite cache as document embeddings.
 
-- Invalid requests return a clear client error without calling retrieval.
-- No or low-confidence evidence returns an explicit insufficient-evidence response.
-- Retrieval, embedding, or generation timeouts are bounded and classified separately.
-- Provider failures must not expose secrets, stack traces, or raw internal prompts.
-- Record latency by stage, result counts, token use, citation validation, refusal rate,
-  and provider errors. Avoid logging full questions, source bodies, or generated answers
-  unless an explicit privacy-reviewed retention policy permits it.
+## Is there a UI or generated answer?
 
-Online feedback must not silently modify ranking or prompts. Feed reviewed failures
-into the version-controlled retrieval evaluation set instead.
+**No.** There is no browser UI, React query form, HTTP API, or chat screen in the
+current repository. The terminal is the user interface. The program retrieves source
+chunks but does not pass them to a large language model, write a natural-language
+answer, or validate and render citations.
+
+A future answer-generation layer would need input limits, context assembly, parent
+hydration, a model adapter, grounded-answer instructions, citation validation, privacy
+controls, and clear insufficient-evidence behavior. None of those should be described
+as implemented yet.
