@@ -124,7 +124,7 @@ python -m pytest
 
 ```bash
 sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip
+sudo apt install -y git python3.12 python3.12-venv python3-pip
 ```
 
 2. Download, set up, run, and test the project. Replace `<repository-url>` with this
@@ -133,7 +133,7 @@ sudo apt install -y git python3 python3-venv python3-pip
 ```bash
 git clone <repository-url>
 cd rag-engine-react-js-docs
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[test]'

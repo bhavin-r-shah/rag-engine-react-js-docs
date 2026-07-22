@@ -23,3 +23,16 @@ OVERLAP_TOKENS = 75
 # This tokenizer converts text into the same kind of units used by OpenAI-family
 # models, making the size settings more meaningful than character counts.
 TOKENIZER_ENCODING = "cl100k_base"
+
+# Embedding settings
+EMBEDDING_BATCH_SIZE = 32
+DEFAULT_LOCAL_MODEL = "all-mpnet-base-v2"       # 768 dims, top quality on SBERT leaderboard
+DEFAULT_OPENAI_MODEL = "text-embedding-3-small"  # 1536 dims
+
+# Output paths
+JSONL_PATH = "output/react-doc-chunks.jsonl"
+EMBED_CACHE_PATH = "output/embed_cache.db"
+CHROMA_DB_DIR = "output/chroma_db"
+CHROMA_COLLECTION = "react_docs"
+QDRANT_DB_DIR = "output/qdrant_db"
+QDRANT_COLLECTION = "react_docs"
