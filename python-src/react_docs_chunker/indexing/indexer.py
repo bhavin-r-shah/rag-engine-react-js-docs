@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
-from react_docs_chunker.indexing.vector_store import VectorStore
+
+if TYPE_CHECKING:
+    from react_docs_chunker.indexing.vector_store import VectorStore
 
 
 def run_indexing(

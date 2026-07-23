@@ -4,8 +4,7 @@
 
 Ingestion turns the React documentation corpus into deterministic, traceable records
 for downstream RAG stages. File discovery, safe text loading, metadata derivation,
-chunking invocation, and JSONL serialization are **implemented**. The indexing CLI also
-automatically invokes this stage when its JSONL input is missing. Incremental
+chunking invocation, and JSONL serialization are **implemented**. The explicit offline indexing command invokes this stage before embedding and storage. Incremental
 manifests, staging, atomic promotion, and production reports are **proposed**.
 
 ## Implemented pipeline

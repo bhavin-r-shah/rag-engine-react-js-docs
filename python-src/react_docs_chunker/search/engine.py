@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
-from react_docs_chunker.indexing.vector_store import VectorStore
-from react_docs_chunker.search.bm25 import BM25Store
+
+if TYPE_CHECKING:
+    from react_docs_chunker.indexing.vector_store import VectorStore
+    from react_docs_chunker.search.bm25 import BM25Store
 
 
 def load_parents(jsonl_path: Path) -> dict[str, dict]:
@@ -25,12 +28,9 @@ def load_parents(jsonl_path: Path) -> dict[str, dict]:
 def _embed_query(
     query_text: str, embedder: EmbeddingProvider, cache: EmbedCache
 ) -> list[float]:
-    cached = cache.get(embedder.model_id, query_text)
-    if cached is not None:
-        return cached
-    vec = embedder.embed_batch([query_text])[0]
-    cache.put(embedder.model_id, query_text, vec)
-    return vec
+    # Document embeddings are cached during the one-time offline indexing stage.
+    # User queries are online inputs and are embedded afresh for every search.
+    return embedder.embed_batch([query_text])[0]
 
 
 def dense_search(

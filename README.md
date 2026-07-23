@@ -14,8 +14,8 @@
 
 This project turns the Markdown files from the official React documentation into
 small JSON records called **chunks**, converts the searchable chunks into embeddings,
-stores them in ChromaDB, and searches them from a command line. You do not need to
-know Python or AI to try the local workflow.
+stores them in ChromaDB, and searches them from a terminal or local browser UI. You
+do not need to know Python or AI to try the workflow.
 
 The input documents are in [`react-js-docs/`](react-js-docs/). The Python program
 reads them as text; it never runs JavaScript, JSX, MDX, or code examples found in
@@ -33,23 +33,26 @@ Every record includes the source file and React URL, title and heading path, sta
 IDs, a SHA-256 source checksum, content type, token count, and text. A **token** is a
 small unit of text used by an AI model; it is not exactly the same as a word.
 
-## Step-by-step: from documents to search results
+## Understand the two parts
 
-The easiest beginner path uses the free local embedding model. It does not require an
-API key, although it downloads the model the first time it runs.
+The pipeline deliberately separates expensive preparation from interactive questions:
 
-### 1. Install and activate the project
+1. **Offline—run once:** ingest documents, chunk them, embed every child, and store the
+   vectors in ChromaDB. Run it again only when documents, chunking settings, or the
+   embedding model change.
+2. **Online—run for every question:** embed the new user query, search the existing
+   index, retrieve cited chunks, and optionally ask a chat model for a grounded answer.
 
-Install Git and Python 3.12 first. Then open a terminal (Command Prompt on Windows),
-clone the repository, and enter it:
+## Step-by-step setup and run instructions
+
+### 1. Create the Python environment
+
+Install Git and Python 3.12, clone this repository, and enter it:
 
 ```bash
 git clone <repository-url>
 cd rag-engine-react-js-docs
 ```
-
-Create an isolated Python environment and install the chunking, local embedding,
-ChromaDB, search, and test dependencies.
 
 **Windows Command Prompt:**
 
@@ -57,109 +60,105 @@ ChromaDB, search, and test dependencies.
 python -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-python -m pip install -e ".[test,embed]"
+python -m pip install -e ".[test,embed,embed-openai]"
 ```
 
-**macOS, Ubuntu, or Debian terminal:**
+**macOS or Linux:**
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e '.[test,embed]'
+python -m pip install -e '.[test,embed,embed-openai]'
 ```
 
-On macOS, Homebrew can install Python with `brew install python@3.12 git`. On Ubuntu
-or Debian, install it with
-`sudo apt install -y git python3.12 python3.12-venv python3-pip` after `sudo apt update`.
-
-### 2. Run ingestion and chunking
-
-Run this command from the repository root while the virtual environment is active:
+The OpenAI dependency is needed for generated answers. Set the key only in your
+terminal; never commit it:
 
 ```bash
-python -m react_docs_chunker.cli
-```
-
-On Windows Command Prompt, the command is identical. It performs two stages:
-
-1. **Ingestion** discovers `.md` and `.mdx` files in `react-js-docs/`, reads them as
-   text, and adds source metadata.
-2. **Chunking** separates each document by Markdown headings and divides oversized
-   sections into smaller child chunks.
-
-It writes `output/react-doc-chunks.jsonl`. Parent records keep complete sections;
-child records are the pieces that the next stage embeds and searches.
-
-### 3. Create embeddings and index them in ChromaDB
-
-```bash
-python -m react_docs_chunker.indexing.cli --embedder local --vector-db chroma
-```
-
-The command reads only child records, uses the local `all-mpnet-base-v2` model to turn
-their text into number lists called **embeddings**, and upserts them into the
-`react_docs` collection in `output/chroma_db/`. Similar meanings produce nearby
-vectors, which enables semantic search. Embeddings are cached in
-`output/embed_cache.db`, so a later indexing run can reuse unchanged work.
-
-If the JSONL file is missing, the indexing command runs ingestion and chunking for
-you. Running step 2 explicitly is still recommended while learning because it makes
-each pipeline stage visible.
-
-### 4. Search with a user query
-
-Put the question in quotes:
-
-```bash
-python -m react_docs_chunker.search.cli "How do I update state based on the previous state?" --mode hybrid --n 5
-```
-
-The default `hybrid` mode combines **dense search** (meaning similarity in ChromaDB)
-with **BM25 search** (exact-word matching over the JSONL chunks). Reciprocal Rank
-Fusion (RRF) combines the two ranked lists. The terminal prints the top five routes,
-scores, and text previews. It returns relevant source chunks, **not a generated
-chatbot answer**.
-
-Other useful modes are:
-
-```bash
-python -m react_docs_chunker.search.cli "useEffect cleanup" --mode dense --n 5
-python -m react_docs_chunker.search.cli "useEffect cleanup" --mode bm25 --n 5
-python -m react_docs_chunker.search.cli "useEffect cleanup" --mode all --n 5
-```
-
-Dense and hybrid search must use the same embedding provider used for indexing.
-BM25-only search rebuilds its in-memory keyword index from JSONL and does not need
-ChromaDB or an embedding model at query time.
-
-### 5. Optional: use OpenAI embeddings
-
-Install the provider dependencies and set your key before indexing:
-
-```bash
-python -m pip install -e '.[embed,embed-openai]'
 export OPENAI_API_KEY="your-api-key"
-python -m react_docs_chunker.indexing.cli --embedder openai
-python -m react_docs_chunker.search.cli "What does useMemo do?" --embedder openai
+export OPENAI_CHAT_MODEL="gpt-4o-mini"  # optional override
 ```
 
-On Windows Command Prompt, set the key with `set OPENAI_API_KEY=your-api-key`. Do not
-commit a key. A Chroma collection records its model and vector dimensions; delete
-`output/chroma_db/` and re-index before switching between local and OpenAI models.
+On Windows Command Prompt use `set OPENAI_API_KEY=your-api-key`.
 
-### 6. Verify the installation
+### 2. Run the offline pipeline once
+
+The indexing command performs ingestion, chunking, document embedding, and ChromaDB
+storage in one explicit run:
+
+```bash
+python -m react_docs_chunker.indexing.cli \
+  --chunking-method markdown \
+  --target-tokens 600 \
+  --max-tokens 900 \
+  --overlap-tokens 75 \
+  --embedder local
+```
+
+Windows Command Prompt users can put the command on one line. The run creates:
+
+- `output/react-doc-chunks.jsonl` — parent and child records;
+- `output/embed_cache.db` — reusable document embeddings;
+- `output/chroma_db/` — the persistent vector index; and
+- `output/index_manifest.json` — the active chunk and embedding settings.
+
+Do **not** run this command before every question. Rebuild only when the source files
+or offline settings change.
+
+### 3. Choose a chunking method
+
+The offline command supports:
+
+| Method | CLI value | When to use it |
+| --- | --- | --- |
+| Markdown-aware | `markdown` | Recommended for these docs. Keeps headings, breadcrumbs, paragraphs, and fenced code together where possible. |
+| Fixed length with overlap | `fixed` | Creates chunks near `--target-tokens` and repeats up to `--overlap-tokens` from the previous chunk. |
+| Recursive | `recursive` | Tries paragraphs, lines, sentences, and words in order until each piece fits the token budget. |
+
+For example, create 400-token fixed chunks with 50 tokens of overlap:
+
+```bash
+python -m react_docs_chunker.indexing.cli --chunking-method fixed --target-tokens 400 --max-tokens 400 --overlap-tokens 50
+```
+
+### 4. Start the browser UI
+
+```bash
+python -m react_docs_chunker.ui.app
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The sidebar separates:
+
+- **online controls:** Top K, dense/BM25/hybrid search, and query embedder; and
+- **one-time offline controls:** chunking method, token length, maximum, overlap, and
+  the explicit Build/Rebuild button.
+
+Enter a question and select **Ask**. For every question the server embeds that query
+again and searches the existing index. The page displays the generated answer plus
+expandable retrieved chunks, scores, and clickable React documentation citations.
+Clear **Generate an LLM answer** to inspect retrieval without calling the chat model.
+
+The default document/query embedder is local `all-mpnet-base-v2`. The default answer
+model is `gpt-4o-mini`, configurable with `OPENAI_CHAT_MODEL`. The same embedding
+provider must be used for offline indexing and online dense or hybrid search.
+
+### 5. Optional terminal-only search
+
+The browser is not required for retrieval:
+
+```bash
+python -m react_docs_chunker.search.cli "How does effect cleanup work?" --mode hybrid --n 5
+```
+
+The terminal command prints retrieved previews but does not generate the final chat
+answer.
+
+### 6. Run tests
 
 ```bash
 python -m pytest
 ```
-
-## Is there a web UI?
-
-**No.** PR #8 implements Python command-line indexing and search, not a browser UI,
-React search page, query API, or answer-generating chatbot. Enter the query in the
-terminal as shown above and read the ranked chunk previews there. A UI and grounded
-AI answer generation remain future work.
 
 ## Running with different input, output, or chunk sizes
 
@@ -219,10 +218,10 @@ the upstream commit in `react-js-docs/.react-docs-commit`.
 
 ## What this project does not do yet
 
-The project now embeds, indexes, and searches retrieval chunks. It does not expose a
-web UI or HTTP API, hydrate complete parent sections in CLI output, rerank with a
-model, or call a generative AI model to compose an answer. See
-[`low-level-design.md`](low-level-design.md) for the exact implementation boundary.
+The project provides a local browser UI and grounded OpenAI answer generation. It is
+still a learning application, not a production service: it has no authentication,
+concurrent index-build coordination across processes, model reranker, or production
+deployment hardening. See [`low-level-design.md`](low-level-design.md).
 
 ## React documentation license and attribution
 

@@ -32,6 +32,8 @@ from typing import Callable
 
 from .config import CHUNK_BY_HEADING, MAX_TOKENS, OVERLAP_TOKENS, TARGET_TOKENS
 
+CHUNKING_METHODS = ("markdown", "fixed", "recursive")
+
 # Compiling regular expressions once is more efficient than rebuilding them for every
 # line. These expressions recognize ATX headings and simple scalar front-matter fields.
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -186,6 +188,86 @@ def _pack_blocks(
     return chunks
 
 
+def _take_overlap(units: list[str], count: Callable[[str], int], overlap: int) -> list[str]:
+    """Return the largest trailing group of units that fits the overlap budget."""
+    carried: list[str] = []
+    for unit in reversed(units):
+        candidate = "".join([unit, *carried])
+        if count(candidate) > overlap:
+            break
+        carried.insert(0, unit)
+    return carried
+
+
+def _fixed_chunks(
+    text: str, count: Callable[[str], int], length: int, overlap: int
+) -> list[str]:
+    """Create fixed token-budget chunks with a trailing sliding overlap."""
+    units = re.findall(r"\S+\s*", text)
+    chunks: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(units):
+        unit = units[index]
+        if current and count("".join([*current, unit])) > length:
+            chunks.append("".join(current).strip())
+            current = _take_overlap(current, count, overlap)
+            # An overlap that occupies the whole budget must still make progress.
+            if current and count("".join([*current, unit])) > length:
+                current = []
+            continue
+        current.append(unit)
+        index += 1
+    if current:
+        chunks.append("".join(current).strip())
+    return [chunk for chunk in chunks if chunk]
+
+
+def _recursive_pieces(text: str, count: Callable[[str], int], limit: int) -> list[str]:
+    """Recursively prefer semantic separators before falling back to words."""
+    separators = ("\n\n", "\n", ". ", " ")
+
+    def split(value: str, depth: int = 0) -> list[str]:
+        value = value.strip()
+        if not value or count(value) <= limit:
+            return [value] if value else []
+        if depth >= len(separators):
+            return _fixed_chunks(value, count, limit, 0)
+        separator = separators[depth]
+        parts = value.split(separator)
+        if len(parts) == 1:
+            return split(value, depth + 1)
+        pieces: list[str] = []
+        for i, part in enumerate(parts):
+            joined = part + (separator if i < len(parts) - 1 else "")
+            pieces.extend(split(joined, depth + 1))
+        return pieces
+
+    return split(text)
+
+
+def _recursive_chunks(
+    text: str, count: Callable[[str], int], target: int, overlap: int
+) -> list[str]:
+    """Split recursively, then pack neighboring pieces up to the target budget."""
+    pieces = _recursive_pieces(text, count, target)
+    chunks: list[str] = []
+    current: list[str] = []
+    for piece in pieces:
+        candidate = "\n\n".join([*current, piece])
+        if current and count(candidate) > target:
+            completed = "\n\n".join(current).strip()
+            chunks.append(completed)
+            carried = "".join(
+                _take_overlap(re.findall(r"\S+\s*", completed), count, overlap)
+            ).strip()
+            current = [carried] if carried else []
+        current.append(piece)
+    if current:
+        chunks.append("\n\n".join(current).strip())
+    return [chunk for chunk in chunks if chunk]
+
+
 def _content_kind(text: str) -> str:
     """Give downstream search code a simple prose/code filter."""
     has_code = "```" in text or "~~~" in text
@@ -215,7 +297,15 @@ def _source_metadata(path: Path, corpus_root: Path, raw: str) -> dict[str, str]:
     }
 
 
-def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], target: int, maximum: int, overlap: int) -> list[dict]:
+def chunk_document(
+    path: Path,
+    corpus_root: Path,
+    count: Callable[[str], int],
+    target: int,
+    maximum: int,
+    overlap: int,
+    method: str = "markdown",
+) -> list[dict]:
     """Read one file and return dictionaries that Python can serialize as JSON.
 
     ``count`` is a function supplied by the caller. Passing a function into another
@@ -232,7 +322,9 @@ def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], t
     # Heading chunking is the recommended default. Keeping this switch here makes
     # config.py truthful: setting it to False treats the document as one section,
     # after which the same safe block and token rules still create child chunks.
-    sections = _sections(body, title) if CHUNK_BY_HEADING else [
+    if method not in CHUNKING_METHODS:
+        raise ValueError(f"unknown chunking method: {method}")
+    sections = _sections(body, title) if method == "markdown" and CHUNK_BY_HEADING else [
         Section((title,), "", tuple(_markdown_blocks(body)))
     ]
     for section_number, section in enumerate(sections):
@@ -247,7 +339,13 @@ def chunk_document(path: Path, corpus_root: Path, count: Callable[[str], int], t
         child_target = max(1, target - prefix_tokens)
         child_maximum = max(child_target, maximum - prefix_tokens)
         child_overlap = min(overlap, max(0, child_target - 1))
-        for child_number, child in enumerate(_pack_blocks(section.blocks, count, child_target, child_maximum, child_overlap)):
+        if method == "fixed":
+            children = _fixed_chunks(parent_text, count, child_target, child_overlap)
+        elif method == "recursive":
+            children = _recursive_chunks(parent_text, count, child_target, child_overlap)
+        else:
+            children = _pack_blocks(section.blocks, count, child_target, child_maximum, child_overlap)
+        for child_number, child in enumerate(children):
             # Breadcrumb text makes a retrieved fragment understandable on its own.
             retrieval_text = prefix + child
             records.append({"recordType": "child", "documentId": document_id, "parentId": parent_id, "chunkId": _stable_id(parent_id, child), **metadata, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(child), "chunkIndex": child_number, "tokenCount": count(retrieval_text), "text": retrieval_text})
@@ -261,6 +359,7 @@ def chunk_corpus(
     target: int = TARGET_TOKENS,
     maximum: int = MAX_TOKENS,
     overlap: int = OVERLAP_TOKENS,
+    method: str = "markdown",
 ) -> int:
     """Chunk all supported files and return the number of records written.
 
@@ -270,12 +369,14 @@ def chunk_corpus(
     """
     if not (0 <= overlap < target <= maximum):
         raise ValueError("expected 0 <= overlap < target <= maximum")
+    if method not in CHUNKING_METHODS:
+        raise ValueError(f"method must be one of {', '.join(CHUNKING_METHODS)}")
     # rglob also supports a future nested corpus, while sorting makes two identical
     # runs byte-for-byte reproducible regardless of filesystem traversal order.
     files = sorted(path for path in corpus.rglob("*") if path.is_file() and not path.is_symlink() and path.suffix.lower() in {".md", ".mdx"})
     # This nested list comprehension means: process each file, then place every record
     # returned for that file into one flat list in deterministic file order.
-    records = [record for path in files for record in chunk_document(path, corpus, count, target, maximum, overlap)]
+    records = [record for path in files for record in chunk_document(path, corpus, count, target, maximum, overlap, method)]
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
     return len(records)

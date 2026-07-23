@@ -1,38 +1,32 @@
-# User query design
+# User query and answer generation
 
-## Responsibility and status
+## Browser UI
 
-PR #8 implements a **terminal search query**, not a full chatbot question-and-answer
-stage. A user supplies a non-empty positional string to the search CLI, which retrieves
-and prints ranked child-chunk previews.
+Start the local server with:
 
-## Implemented flow
+```bash
+python -m react_docs_chunker.ui.app
+```
 
-1. Activate the project virtual environment.
-2. Enter a quoted query, for example:
+The page at `http://127.0.0.1:8000` provides online controls for Top K, dense/BM25/
+hybrid search, and embedding provider. It also displays the one-time offline index
+settings separately so a beginner can see that chunking and document embedding do not
+run for every question.
 
-   ```bash
-   python -m react_docs_chunker.search.cli "When should I use useMemo?" --mode hybrid --n 5
-   ```
+## Per-question flow
 
-3. `argparse` reads the query, mode, provider, vector database, JSONL path, and result
-   count.
-4. Dense or hybrid mode embeds and caches the query, then searches ChromaDB. BM25 or
-   hybrid mode builds a keyword index from JSONL.
-5. The CLI prints ranked routes, scores, and short text previews.
+1. Validate the non-empty question and Top K range.
+2. Build BM25 when required and/or embed the query afresh for dense retrieval.
+3. Search the existing Chroma index and fuse hybrid rankings.
+4. Resolve each child's parent from JSONL and create citation IDs and source links.
+5. When answer generation is enabled, send only the question and retrieved evidence
+   to the configured OpenAI chat model.
+6. Reject an answer that uses citation labels not supplied in the context.
+7. Return the answer, model details, retrieved chunks, scores, and citations as JSON.
 
-Quotes keep a multi-word question as one command-line argument. The `--n` value
-controls the number of displayed results. The query embedding cache uses the same
-SQLite cache as document embeddings.
+The default generation model is `gpt-4o-mini`; set `OPENAI_CHAT_MODEL` to choose
+another model available to the configured account. Clear **Generate an LLM answer**
+to perform retrieval without a generation API call.
 
-## Is there a UI or generated answer?
-
-**No.** There is no browser UI, React query form, HTTP API, or chat screen in the
-current repository. The terminal is the user interface. The program retrieves source
-chunks but does not pass them to a large language model, write a natural-language
-answer, or validate and render citations.
-
-A future answer-generation layer would need input limits, context assembly, parent
-hydration, a model adapter, grounded-answer instructions, citation validation, privacy
-controls, and clear insufficient-evidence behavior. None of those should be described
-as implemented yet.
+The server binds to `127.0.0.1` by default and is intended for local learning. It does
+not implement user authentication, request quotas, or production deployment controls.
