@@ -44,7 +44,8 @@ are unreliable.
 
 ## Shared rules
 
-All methods require `0 <= overlap < target <= maximum`. Children include stable IDs,
-parent IDs, provenance, token counts, and text. Changing the method or token settings
-changes the searchable corpus, so run the offline indexing pipeline again. These are
-not per-question options.
+All methods require `0 <= overlap < target <= maximum`. Children include deterministic
+IDs, parent IDs, provenance, token counts, and text. Section and child positions make
+IDs unique even when one document repeats identical headings or text. Changing the
+method or token settings changes the searchable corpus, so run the offline indexing
+pipeline again. These are not per-question options.

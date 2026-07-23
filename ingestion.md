@@ -20,9 +20,10 @@ manifests, staging, atomic promotion, and production reports are **proposed**.
 4. [`_source_metadata`](python-src/react_docs_chunker/chunker.py#L198-L215) derives a
    corpus-relative source path, React route and URL, first-segment document type, and
    SHA-256 checksum of the original text.
-5. [`_stable_id`](python-src/react_docs_chunker/chunker.py#L57-L62) hashes semantic
-   identity components with separators, making IDs independent of corpus insertion
-   order.
+5. [`_stable_id`](python-src/react_docs_chunker/chunker.py#L57-L62) hashes identity
+   components with separators. Document IDs remain independent of corpus insertion
+   order; parent and child positions disambiguate repeated identical content within a
+   document while remaining deterministic for an unchanged input.
 6. The document is passed into the [chunking stage](chunking.md), after which
    [`chunk_corpus`](python-src/react_docs_chunker/chunker.py#L275-L280) writes one JSON
    object per line to the configured output path.

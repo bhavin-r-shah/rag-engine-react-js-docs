@@ -166,3 +166,26 @@ def test_dense_query_applies_exact_metadata_filters(tmp_path):
     )
 
     assert [result["chunkId"] for result in results] == ["c1"]
+
+
+def test_duplicate_ids_fail_before_embedding(tmp_path):
+    embedder = StubEmbedder()
+    cache = EmbedCache(tmp_path / "cache.db")
+    store = _chroma_store(embedder)
+    jsonl = _make_jsonl(
+        tmp_path, [_child("duplicate", "first"), _child("duplicate", "second")]
+    )
+
+    with pytest.raises(ValueError, match="duplicate child chunk ID"):
+        run_indexing(jsonl, embedder, cache, store)
+
+    assert cache.get(embedder.model_id, "first") is None
+
+
+def test_vector_store_rejects_duplicate_ids_defensively():
+    embedder = StubEmbedder()
+    store = _chroma_store(embedder)
+    records = [_child("duplicate", "first"), _child("duplicate", "second")]
+
+    with pytest.raises(ValueError, match="not unique"):
+        store.upsert_chunks(records, embedder.embed_batch(["first", "second"]))

@@ -25,6 +25,10 @@ type, title, anchor, content kind, token count, source URL, and source path. Ups
 avoid duplicates when the same ID is indexed again. Collection metadata rejects an
 incompatible embedding model or vector dimension.
 
+Before any embedding work begins, the indexer verifies that all child IDs are unique.
+The Chroma adapter checks again immediately before upsert, providing a clear project
+error instead of a late database `DuplicateIDError`.
+
 Each build writes to a new Chroma collection and records that collection name in the
 manifest. JSONL and the manifest are replaced only after indexing succeeds. Therefore
 a chunking or embedding change cannot leave stale chunks in the active collection,

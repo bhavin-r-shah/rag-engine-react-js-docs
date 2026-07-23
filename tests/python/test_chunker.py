@@ -129,3 +129,23 @@ def test_recursive_chunking_prefers_paragraph_boundaries(tmp_path):
 def test_unknown_chunking_method_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="method must be one of"):
         chunk_corpus(tmp_path, tmp_path / "out.jsonl", word_count, method="unknown")
+
+
+def test_repeated_identical_sections_have_unique_deterministic_ids(tmp_path):
+    corpus = tmp_path / "react-js-docs"
+    corpus.mkdir()
+    (corpus / "repeated.md").write_text(
+        "# Same\n\nRepeated text.\n\n# Same\n\nRepeated text.\n",
+        encoding="utf-8",
+    )
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+
+    chunk_corpus(corpus, first, word_count)
+    chunk_corpus(corpus, second, word_count)
+    first_rows = [json.loads(line) for line in first.read_text().splitlines()]
+    second_rows = [json.loads(line) for line in second.read_text().splitlines()]
+    first_ids = [row["chunkId"] for row in first_rows]
+
+    assert len(first_ids) == len(set(first_ids))
+    assert first_ids == [row["chunkId"] for row in second_rows]

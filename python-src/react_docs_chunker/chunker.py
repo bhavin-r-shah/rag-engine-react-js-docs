@@ -330,7 +330,11 @@ def chunk_document(
     for section_number, section in enumerate(sections):
         parent_text = "\n\n".join(section.blocks)
         heading_path = list(section.headings)
-        parent_id = _stable_id(document_id, section.anchor, parent_text)
+        # Position disambiguates repeated headings with identical section text while
+        # remaining deterministic for repeated runs of an unchanged document.
+        parent_id = _stable_id(
+            document_id, str(section_number), section.anchor, parent_text
+        )
         records.append({"recordType": "parent", "documentId": document_id, "chunkId": parent_id, **metadata, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(parent_text), "chunkIndex": section_number, "tokenCount": count(parent_text), "text": parent_text})
         prefix = f"{' > '.join(heading_path)}\n\n"
         # The breadcrumb is part of the embedded child, so reserve its tokens when
@@ -348,7 +352,7 @@ def chunk_document(
         for child_number, child in enumerate(children):
             # Breadcrumb text makes a retrieved fragment understandable on its own.
             retrieval_text = prefix + child
-            records.append({"recordType": "child", "documentId": document_id, "parentId": parent_id, "chunkId": _stable_id(parent_id, child), **metadata, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(child), "chunkIndex": child_number, "tokenCount": count(retrieval_text), "text": retrieval_text})
+            records.append({"recordType": "child", "documentId": document_id, "parentId": parent_id, "chunkId": _stable_id(parent_id, str(child_number), child), **metadata, "title": title, "headingPath": heading_path, "anchor": section.anchor, "contentKind": _content_kind(child), "chunkIndex": child_number, "tokenCount": count(retrieval_text), "text": retrieval_text})
     return records
 
 

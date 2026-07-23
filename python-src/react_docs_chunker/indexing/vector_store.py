@@ -65,6 +65,8 @@ class ChromaVectorStore(VectorStore):
 
     def upsert_chunks(self, records: list[dict], embeddings: list[list[float]]) -> None:
         ids = [r["chunkId"] for r in records]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Cannot upsert chunks because chunk IDs are not unique")
         documents = [r["text"] for r in records]
         metadatas = [
             {
