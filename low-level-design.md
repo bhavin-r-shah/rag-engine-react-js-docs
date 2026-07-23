@@ -28,7 +28,7 @@ browser question -> fresh query embedding -> dense/BM25/hybrid retrieval
 | `embed/` | Local and OpenAI embedding providers plus the document embedding cache. |
 | `indexing/vector_store.py` | Persistent Chroma child storage and dense queries. |
 | `search/` | Fresh query embedding, BM25, dense retrieval, and RRF hybrid fusion. |
-| `rag/service.py` | Online orchestration, parent hydration, citations, and structured results. |
+| `rag/service.py` | Manifest-aware online orchestration, metadata filters, parent hydration, citations, and structured results. |
 | `generation/` | Provider contract and grounded OpenAI chat generation. |
 | `ui/` | Local browser server with offline setup and online query panels. |
 
@@ -41,6 +41,11 @@ manifest records the selected values.
 Question text, Top K, search method, and answer-generation toggle are online settings.
 Each dense or hybrid question receives a new query embedding compatible with the
 stored document vectors. BM25 queries do not need embeddings.
+
+Document type, content kind, and exact route are optional online filters. They are
+applied consistently to dense and BM25 candidates before hybrid fusion. Each offline
+build writes a new collection, then activates it through the manifest so stale chunks
+from an earlier strategy are never queried.
 
 ## Current constraints
 

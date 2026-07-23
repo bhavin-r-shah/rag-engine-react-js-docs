@@ -14,7 +14,10 @@ class VectorStore(ABC):
     def upsert_chunks(self, records: list[dict], embeddings: list[list[float]]) -> None: ...
 
     @abstractmethod
-    def query_dense(self, query_embedding: list[float], n_results: int) -> list[dict]: ...
+    def query_dense(
+        self, query_embedding: list[float], n_results: int,
+        metadata_filters: dict[str, str] | None = None,
+    ) -> list[dict]: ...
 
     @abstractmethod
     def query_hybrid(
@@ -79,8 +82,16 @@ class ChromaVectorStore(VectorStore):
         ]
         self._col.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
-    def query_dense(self, query_embedding: list[float], n_results: int) -> list[dict]:
-        result = self._col.query(query_embeddings=[query_embedding], n_results=n_results)
+    def query_dense(
+        self, query_embedding: list[float], n_results: int,
+        metadata_filters: dict[str, str] | None = None,
+    ) -> list[dict]:
+        clauses = [{key: {"$eq": value}} for key, value in (metadata_filters or {}).items()]
+        where = clauses[0] if len(clauses) == 1 else ({"$and": clauses} if clauses else None)
+        kwargs = {"query_embeddings": [query_embedding], "n_results": n_results}
+        if where:
+            kwargs["where"] = where
+        result = self._col.query(**kwargs)
         return [
             {"chunkId": id_, "text": doc, "metadata": meta, "distance": dist}
             for id_, doc, meta, dist in zip(

@@ -9,7 +9,8 @@ python -m react_docs_chunker.ui.app
 ```
 
 The page at `http://127.0.0.1:8000` provides online controls for Top K, dense/BM25/
-hybrid search, and embedding provider. It also displays the one-time offline index
+hybrid search, document type, content kind, and exact route. It also displays the active
+embedding provider as read-only and keeps the one-time offline index
 settings separately so a beginner can see that chunking and document embedding do not
 run for every question.
 
@@ -17,7 +18,8 @@ run for every question.
 
 1. Validate the non-empty question and Top K range.
 2. Build BM25 when required and/or embed the query afresh for dense retrieval.
-3. Search the existing Chroma index and fuse hybrid rankings.
+3. Apply selected metadata filters, search the active Chroma collection, and fuse
+   hybrid rankings.
 4. Resolve each child's parent from JSONL and create citation IDs and source links.
 5. When answer generation is enabled, send only the question and retrieved evidence
    to the configured OpenAI chat model.

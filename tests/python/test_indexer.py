@@ -147,3 +147,22 @@ def test_cache_hits_on_second_run(tmp_path):
     assert stats1["newly_embedded"] == 1
     assert stats2["cache_hits"] == 1
     assert stats2["newly_embedded"] == 0
+
+
+def test_dense_query_applies_exact_metadata_filters(tmp_path):
+    embedder = StubEmbedder()
+    store = _chroma_store(embedder)
+    reference = _child("c1", "reference text")
+    learn = _child("c2", "learning text")
+    reference["docType"] = "reference"
+    learn["docType"] = "learn"
+    store.upsert_chunks(
+        [reference, learn], embedder.embed_batch([reference["text"], learn["text"]])
+    )
+
+    results = store.query_dense(
+        embedder.embed_batch(["learning text"])[0], n_results=2,
+        metadata_filters={"docType": "reference"},
+    )
+
+    assert [result["chunkId"] for result in results] == ["c1"]

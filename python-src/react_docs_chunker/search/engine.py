@@ -39,9 +39,12 @@ def dense_search(
     cache: EmbedCache,
     vector_store: VectorStore,
     n: int = 10,
+    metadata_filters: dict[str, str] | None = None,
 ) -> list[dict]:
     query_vec = _embed_query(query_text, embedder, cache)
-    return vector_store.query_dense(query_vec, n_results=n)
+    return vector_store.query_dense(
+        query_vec, n_results=n, metadata_filters=metadata_filters
+    )
 
 
 def bm25_search(query_text: str, bm25_store: BM25Store, n: int = 10) -> list[dict]:
@@ -56,6 +59,7 @@ def hybrid_search(
     bm25_store: BM25Store,
     n: int = 10,
     rrf_k: int = 60,
+    metadata_filters: dict[str, str] | None = None,
 ) -> list[dict]:
     """Combine dense and BM25 results using Reciprocal Rank Fusion (RRF).
 
@@ -81,7 +85,10 @@ def hybrid_search(
     an added 'rrf_score' key.
     """
     candidates = n * 3
-    dense_results = dense_search(query_text, embedder, cache, vector_store, n=candidates)
+    dense_results = dense_search(
+        query_text, embedder, cache, vector_store, n=candidates,
+        metadata_filters=metadata_filters,
+    )
     bm25_results = bm25_search(query_text, bm25_store, n=candidates)
 
     scores: dict[str, float] = {}

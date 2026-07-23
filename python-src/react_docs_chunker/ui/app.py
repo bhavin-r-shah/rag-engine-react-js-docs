@@ -10,6 +10,20 @@ from react_docs_chunker.rag.service import RAGService
 
 HTML_PATH = Path(__file__).with_name("index.html")
 MANIFEST_PATH = Path("output/index_manifest.json")
+JSONL_PATH = Path("output/react-doc-chunks.jsonl")
+
+
+def _facets() -> dict[str, list[str]]:
+    values = {"docTypes": set(), "contentKinds": set(), "routes": set()}
+    if JSONL_PATH.exists():
+        for line in JSONL_PATH.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            if record.get("recordType") != "child":
+                continue
+            values["docTypes"].add(record.get("docType", ""))
+            values["contentKinds"].add(record.get("contentKind", ""))
+            values["routes"].add(record.get("route", ""))
+    return {key: sorted(value for value in items if value) for key, items in values.items()}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -24,7 +38,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/api/status":
             manifest = json.loads(MANIFEST_PATH.read_text()) if MANIFEST_PATH.exists() else None
-            self._json({"ready": manifest is not None, "manifest": manifest})
+            self._json({
+                "ready": manifest is not None and JSONL_PATH.exists(),
+                "manifest": manifest,
+                "facets": _facets(),
+            })
             return
         if self.path in {"/", "/index.html"}:
             body = HTML_PATH.read_bytes()
@@ -42,9 +60,13 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length) or b"{}")
             if self.path == "/api/query":
                 result = RAGService().query(
-                    data.get("query", ""), int(data.get("topK", 5)),
-                    data.get("searchMode", "hybrid"), data.get("embedder", "local"),
-                    bool(data.get("generateAnswer", True)),
+                    query_text=data.get("query", ""),
+                    top_k=int(data.get("topK", 5)),
+                    search_mode=data.get("searchMode", "hybrid"),
+                    generate_answer=bool(data.get("generateAnswer", True)),
+                    doc_type=data.get("docType", ""),
+                    content_kind=data.get("contentKind", ""),
+                    route=data.get("route", ""),
                 )
                 self._json(result)
                 return

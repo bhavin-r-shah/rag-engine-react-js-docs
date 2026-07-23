@@ -25,6 +25,12 @@ type, title, anchor, content kind, token count, source URL, and source path. Ups
 avoid duplicates when the same ID is indexed again. Collection metadata rejects an
 incompatible embedding model or vector dimension.
 
+Each build writes to a new Chroma collection and records that collection name in the
+manifest. JSONL and the manifest are replaced only after indexing succeeds. Therefore
+a chunking or embedding change cannot leave stale chunks in the active collection,
+and a failed build does not redirect queries away from the previous manifest. Older
+collections are retained for manual cleanup and rollback.
+
 BM25 is not persisted; the online process rebuilds its in-memory keyword index from
 JSONL. ChromaDB is currently the only vector database. The local UI exposes a clearly
 labelled Build/Rebuild action, but it never starts offline indexing automatically when

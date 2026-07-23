@@ -130,9 +130,32 @@ python -m react_docs_chunker.ui.app
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The sidebar separates:
 
-- **online controls:** Top K, dense/BM25/hybrid search, and query embedder; and
+- **online controls:** Top K, dense/BM25/hybrid search, and metadata filters; and
 - **one-time offline controls:** chunking method, token length, maximum, overlap, and
-  the explicit Build/Rebuild button.
+  document embedder, followed by the explicit Build/Rebuild button.
+
+The active query embedder is read-only because it must match the model used to build
+the index. To change it, choose a different document embedder in the offline section
+and rebuild the index.
+
+### 5. Use query controls and filters
+
+The UI offers these online controls, which do not rebuild the index:
+
+| Control | Meaning |
+| --- | --- |
+| `Top K` | Maximum number of retrieved chunks to return, from 1 to 50. |
+| `Hybrid` | Combines semantic dense search and exact-word BM25 ranking. |
+| `Dense` | Uses a fresh query embedding to find semantically similar chunks. |
+| `BM25` | Uses keyword matching and does not embed the query. |
+| `Document type` | Limits results to one corpus category, such as `learn`, `reference`, or `blog`. |
+| `Content` | Limits results to `prose`, `code`, or `prose_and_code`. |
+| `Exact route` | Limits results to one React documentation route. |
+| `Generate an LLM answer` | Calls the chat model when selected; otherwise only retrieved evidence is shown. |
+
+The three metadata filters are optional and combined with **AND**. For example,
+choosing document type `reference` and content `prose_and_code` returns only chunks
+that satisfy both conditions. Filter choices come from the active JSONL index.
 
 Enter a question and select **Ask**. For every question the server embeds that query
 again and searches the existing index. The page displays the generated answer plus
@@ -143,7 +166,7 @@ The default document/query embedder is local `all-mpnet-base-v2`. The default an
 model is `gpt-4o-mini`, configurable with `OPENAI_CHAT_MODEL`. The same embedding
 provider must be used for offline indexing and online dense or hybrid search.
 
-### 5. Optional terminal-only search
+### 6. Optional terminal-only search
 
 The browser is not required for retrieval:
 
@@ -154,7 +177,7 @@ python -m react_docs_chunker.search.cli "How does effect cleanup work?" --mode h
 The terminal command prints retrieved previews but does not generate the final chat
 answer.
 
-### 6. Run tests
+### 7. Run tests
 
 ```bash
 python -m pytest
