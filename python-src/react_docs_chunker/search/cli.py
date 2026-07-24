@@ -69,45 +69,50 @@ def main() -> None:
 
     embedder = store = bm25 = None
 
-    if needs_dense:
-        print("\nLoading embedder...")
-        manifest_path = Path("output/index_manifest.json")
-        if not manifest_path.exists():
-            parser.error("output/index_manifest.json is missing; build the index first")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        active_embedder = manifest["embedder"]
-        if args.embedder and args.embedder != active_embedder:
-            parser.error(
-                f"active index uses {active_embedder!r}; rebuild it to change embedders"
+    try:
+        if needs_dense:
+            print("\nLoading embedder...")
+            manifest_path = Path("output/index_manifest.json")
+            if not manifest_path.exists():
+                parser.error("output/index_manifest.json is missing; build the index first")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            active_embedder = manifest["embedder"]
+            if args.embedder and args.embedder != active_embedder:
+                parser.error(
+                    f"active index uses {active_embedder!r}; rebuild it to change embedders"
+                )
+            print(f"Embedder : {active_embedder} ({manifest.get('embeddingModel', '')})")
+            embedder = build_embedder(active_embedder)
+            store = build_vector_store(
+                args.vector_db, embedder, collection_name=manifest.get("collectionName")
             )
-        print(f"Embedder : {active_embedder} ({manifest.get('embeddingModel', '')})")
-        embedder = build_embedder(active_embedder)
-        store = build_vector_store(
-            args.vector_db, embedder, collection_name=manifest.get("collectionName")
-        )
 
-    if needs_bm25:
-        print("Building BM25 index from JSONL...")
-        children = _load_children(args.jsonl)
-        bm25 = BM25Store()
-        bm25.build(children)
-        print(f"  Indexed {len(children)} child chunks.")
+        if needs_bm25:
+            print("Building BM25 index from JSONL...")
+            children = _load_children(args.jsonl)
+            bm25 = BM25Store()
+            bm25.build(children)
+            print(f"  Indexed {len(children)} child chunks.")
 
-    if args.mode in ("dense", "all"):
-        results = dense_search(args.query, embedder, cache, store, n=args.n)
-        _print_results("DENSE (semantic)", results, args.n)
+        if args.mode in ("dense", "all"):
+            results = dense_search(args.query, embedder, cache, store, n=args.n)
+            _print_results("DENSE (semantic)", results, args.n)
 
-    if args.mode in ("bm25", "all"):
-        results = bm25_search(args.query, bm25, n=args.n)
-        _print_results("BM25 (keyword)", results, args.n)
+        if args.mode in ("bm25", "all"):
+            results = bm25_search(args.query, bm25, n=args.n)
+            _print_results("BM25 (keyword)", results, args.n)
 
-    if args.mode in ("hybrid", "all"):
-        if args.vector_db == "qdrant":
-            query_vec = embed_query(args.query, embedder, cache)
-            results = store.query_hybrid(args.query, query_vec, n_results=args.n)
-        else:
-            results = hybrid_search(args.query, embedder, cache, store, bm25, n=args.n)
-        _print_results("HYBRID (RRF)", results, args.n)
+        if args.mode in ("hybrid", "all"):
+            if args.vector_db == "qdrant":
+                query_vec = embed_query(args.query, embedder, cache)
+                results = store.query_hybrid(args.query, query_vec, n_results=args.n)
+            else:
+                results = hybrid_search(args.query, embedder, cache, store, bm25, n=args.n)
+            _print_results("HYBRID (RRF)", results, args.n)
+    finally:
+        cache.close()
+        if store is not None:
+            store.close()
 
 
 if __name__ == "__main__":

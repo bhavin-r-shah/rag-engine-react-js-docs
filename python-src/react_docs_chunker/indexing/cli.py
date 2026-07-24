@@ -24,6 +24,7 @@ def main() -> None:
     result = build_index(
         args.corpus, args.jsonl, args.embedder, args.chunking_method,
         args.target_tokens, args.max_tokens, args.overlap_tokens,
+        vector_db_name=args.vector_db,
     )
     print("\nIndex ready. Run this command again only when documents or index settings change.")
     print(f"  Chunking method: {result['chunkingMethod']}")

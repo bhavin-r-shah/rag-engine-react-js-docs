@@ -48,6 +48,8 @@ class ChromaVectorStore(VectorStore):
 
     def upsert_chunks(self, records: list[dict], embeddings: list[list[float]]) -> None:
         ids = [r["chunkId"] for r in records]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Cannot upsert chunks because chunk IDs are not unique")
         documents = [r["text"] for r in records]
         metadatas = [
             {
@@ -65,8 +67,16 @@ class ChromaVectorStore(VectorStore):
         ]
         self._col.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
-    def query_dense(self, query_embedding: list[float], n_results: int) -> list[dict]:
-        result = self._col.query(query_embeddings=[query_embedding], n_results=n_results)
+    def query_dense(
+        self, query_embedding: list[float], n_results: int,
+        metadata_filters: dict[str, str] | None = None,
+    ) -> list[dict]:
+        clauses = [{key: {"$eq": value}} for key, value in (metadata_filters or {}).items()]
+        where = clauses[0] if len(clauses) == 1 else ({"$and": clauses} if clauses else None)
+        kwargs = {"query_embeddings": [query_embedding], "n_results": n_results}
+        if where:
+            kwargs["where"] = where
+        result = self._col.query(**kwargs)
         return [
             {"chunkId": id_, "text": doc, "metadata": meta, "distance": dist}
             for id_, doc, meta, dist in zip(
@@ -84,3 +94,7 @@ class ChromaVectorStore(VectorStore):
             "ChromaDB does not support native hybrid search. "
             "Use search/engine.py hybrid_search() instead."
         )
+
+    def close(self) -> None:
+        self._client.close()
+

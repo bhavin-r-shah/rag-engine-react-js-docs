@@ -78,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("embedder", "local"), data.get("chunkingMethod", "markdown"),
                     int(data.get("targetTokens", 600)), int(data.get("maxTokens", 900)),
                     int(data.get("overlapTokens", 75)),
+                    vector_db_name=data.get("vectorDb", "qdrant"),
                 )
                 self._json(result)
                 return

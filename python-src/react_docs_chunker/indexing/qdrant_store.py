@@ -97,12 +97,24 @@ class QdrantVectorStore(VectorStore):
 
         self._client.upsert(collection_name=self._col_name, points=points)
 
-    def query_dense(self, query_embedding: list[float], n_results: int) -> list[dict]:
+    def query_dense(
+        self, query_embedding: list[float], n_results: int,
+        metadata_filters: dict[str, str] | None = None,
+    ) -> list[dict]:
+        query_filter = None
+        if metadata_filters:
+            query_filter = self._qm.Filter(
+                must=[
+                    self._qm.FieldCondition(key=key, match=self._qm.MatchValue(value=value))
+                    for key, value in metadata_filters.items()
+                ]
+            )
         hits = self._client.query_points(
             collection_name=self._col_name,
             query=query_embedding,
             using=self._DENSE_FIELD,
             limit=n_results,
+            query_filter=query_filter,
         ).points
         return [
             {
@@ -149,3 +161,6 @@ class QdrantVectorStore(VectorStore):
             }
             for p in hits
         ]
+
+    def close(self) -> None:
+        self._client.close()

@@ -90,30 +90,37 @@ class RAGService:
             }
         bm25 = None
         embedder = store = cache = None
-        if search_mode in {"bm25", "hybrid"}:
-            bm25 = BM25Store()
-            bm25.build(filtered_children)
-        if search_mode in {"dense", "hybrid"}:
-            from react_docs_chunker._cli_utils import build_embedder, build_vector_store
+        try:
+            if search_mode in {"bm25", "hybrid"}:
+                bm25 = BM25Store()
+                bm25.build(filtered_children)
+            if search_mode in {"dense", "hybrid"}:
+                from react_docs_chunker._cli_utils import build_embedder, build_vector_store
 
-            embedder = build_embedder(active_embedder)
-            store = build_vector_store(
-                "chroma", embedder, collection_name=manifest.get("collectionName")
-            )
-            cache = EmbedCache(EMBED_CACHE_PATH)
+                embedder = build_embedder(active_embedder)
+                store = build_vector_store(
+                    manifest.get("vectorDb", "chroma"), embedder,
+                    collection_name=manifest.get("collectionName"),
+                )
+                cache = EmbedCache(EMBED_CACHE_PATH)
 
-        if search_mode == "dense":
-            results = dense_search(
-                query_text, embedder, cache, store, n=top_k,
-                metadata_filters=metadata_filters,
-            )
-        elif search_mode == "bm25":
-            results = bm25_search(query_text, bm25, n=top_k)
-        else:
-            results = hybrid_search(
-                query_text, embedder, cache, store, bm25, n=top_k,
-                metadata_filters=metadata_filters,
-            )
+            if search_mode == "dense":
+                results = dense_search(
+                    query_text, embedder, cache, store, n=top_k,
+                    metadata_filters=metadata_filters,
+                )
+            elif search_mode == "bm25":
+                results = bm25_search(query_text, bm25, n=top_k)
+            else:
+                results = hybrid_search(
+                    query_text, embedder, cache, store, bm25, n=top_k,
+                    metadata_filters=metadata_filters,
+                )
+        finally:
+            if cache is not None:
+                cache.close()
+            if store is not None:
+                store.close()
 
         parents = load_parents(self.jsonl_path)
         citations = []

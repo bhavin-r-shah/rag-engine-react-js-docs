@@ -35,6 +35,6 @@ def build_vector_store(name: str, embedder, collection_name: str | None = None):
             model_id=embedder.model_id,
             dimensions=embedder.dimensions,
             db_dir=QDRANT_DB_DIR,
-            collection_name=QDRANT_COLLECTION,
+            collection_name=collection_name or QDRANT_COLLECTION,
         )
     raise ValueError(f"Unknown vector-db: {name}")

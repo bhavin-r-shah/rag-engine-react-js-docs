@@ -41,7 +41,7 @@ def dense_search(
     n: int = 10,
     metadata_filters: dict[str, str] | None = None,
 ) -> list[dict]:
-    query_vec = _embed_query(query_text, embedder, cache)
+    query_vec = embed_query(query_text, embedder, cache)
     return vector_store.query_dense(
         query_vec, n_results=n, metadata_filters=metadata_filters
     )
