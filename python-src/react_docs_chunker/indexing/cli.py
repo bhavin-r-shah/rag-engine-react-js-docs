@@ -22,7 +22,7 @@ from react_docs_chunker.indexing.indexer import run_indexing
 def main() -> None:
     parser = argparse.ArgumentParser(description="Embed React doc chunks and upsert to a vector store.")
     parser.add_argument("--embedder", choices=["local", "openai"], default="local")
-    parser.add_argument("--vector-db", choices=["chroma"], default="chroma")
+    parser.add_argument("--vector-db", choices=["chroma", "qdrant"], default="qdrant")
     parser.add_argument("--jsonl", default=JSONL_PATH)
     args = parser.parse_args()
 

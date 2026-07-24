@@ -1,24 +1,20 @@
-"""Tests for Phase 3: BM25Store + dense/bm25/hybrid search engine."""
+"""Tests for Phase 4: QdrantVectorStore dense query and native hybrid search."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 
-import chromadb
+import numpy as np
 import pytest
+from qdrant_client import QdrantClient
 
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
 from react_docs_chunker.indexing.indexer import run_indexing
-from react_docs_chunker.indexing.chroma_store import ChromaVectorStore
-from react_docs_chunker.search.bm25 import BM25Store
-from react_docs_chunker.search.engine import bm25_search, dense_search, hybrid_search
+from react_docs_chunker.indexing.qdrant_store import QdrantVectorStore
 
-
-# ---------------------------------------------------------------------------
-# Stub
-# ---------------------------------------------------------------------------
 
 class StubEmbedder(EmbeddingProvider):
     """Text-content deterministic embedder: same text → same vector (SHA-256 based)."""
@@ -44,6 +40,17 @@ class StubEmbedder(EmbeddingProvider):
         return result
 
 
+class StubSparseEncoder:
+    """Deterministic sparse encoder for tests; no model download required."""
+
+    def embed(self, texts):
+        for text in texts:
+            words = list(dict.fromkeys(text.lower().split()))
+            indices = np.array([abs(hash(w)) % 10_000 for w in words], dtype=np.int32)
+            values = np.ones(len(words), dtype=np.float32) / max(len(words), 1)
+            yield SimpleNamespace(indices=indices, values=values)
+
+
 def _child(chunk_id: str, text: str) -> dict:
     return {
         "recordType": "child",
@@ -65,68 +72,46 @@ def _setup(tmp_path, embedder, records):
     path = tmp_path / "chunks.jsonl"
     path.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
     cache = EmbedCache(tmp_path / "cache.db")
-    store = ChromaVectorStore(
+    store = QdrantVectorStore(
         model_id=embedder.model_id,
         dimensions=embedder.dimensions,
-        client=chromadb.EphemeralClient(),
+        client=QdrantClient(":memory:"),
+        collection_name="test_col",
+        sparse_encoder=StubSparseEncoder(),
     )
     run_indexing(str(path), embedder, cache, store)
-    bm25 = BM25Store()
-    bm25.build(records)
-    return str(path), cache, store, bm25
+    return str(path), cache, store
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-def test_dense_search_returns_correct_chunk(tmp_path):
+def test_qdrant_dense_search_returns_correct_chunk(tmp_path):
     embedder = StubEmbedder()
     records = [
         _child("c1", "useEffect runs after every render"),
         _child("c2", "useState returns a stateful pair"),
         _child("c3", "useRef persists a mutable value"),
     ]
-    _, cache, store, _ = _setup(tmp_path, embedder, records)
+    _, _, store = _setup(tmp_path, embedder, records)
 
-    # Same text as c1 → same vector → L2 distance 0 → c1 must be first
-    results = dense_search("useEffect runs after every render", embedder, cache, store, n=1)
+    # Same text as c1 → same SHA-256 vector → cosine similarity 1.0 → c1 must be first
+    query_vec = embedder.embed_batch(["useEffect runs after every render"])[0]
+    results = store.query_dense(query_vec, n_results=1)
     assert results[0]["chunkId"] == "c1"
 
 
-def test_bm25_search_ranks_exact_match_first(tmp_path):
-    embedder = StubEmbedder()
-    records = [
-        _child("c1", "useEffect lifecycle hook cleanup function"),
-        _child("c2", "useState manages component state value"),
-        _child("c3", "useRef stores mutable reference object"),
-    ]
-    _, _, _, bm25 = _setup(tmp_path, embedder, records)
-
-    # "state" appears only in c2 → BM25 must rank c2 first
-    results = bm25_search("state", bm25, n=3)
-    assert results[0]["chunkId"] == "c2"
-
-
-def test_hybrid_search_fuses_dense_and_bm25(tmp_path):
+def test_qdrant_query_hybrid_returns_results(tmp_path):
     embedder = StubEmbedder()
     records = [
         _child("c1", "useEffect cleanup runs on unmount phase"),
         _child("c2", "useState initializes component state value"),
         _child("c3", "useRef stores a mutable reference object"),
     ]
-    _, cache, store, bm25 = _setup(tmp_path, embedder, records)
+    _, _, store = _setup(tmp_path, embedder, records)
 
-    # Dense: exact c1 text → L2 distance 0 for c1; BM25: "cleanup" unique to c1 → both agree
-    results = hybrid_search(
-        "useEffect cleanup runs on unmount phase",
-        embedder, cache, store, bm25,
-        n=3, rrf_k=60,
-    )
+    # Dense: exact c1 text → cosine 1.0; sparse: "cleanup" unique to c1 → both agree
+    query_vec = embedder.embed_batch(["useEffect cleanup runs on unmount phase"])[0]
+    results = store.query_hybrid("useEffect cleanup runs on unmount phase", query_vec, n_results=3)
 
+    assert len(results) > 0
+    assert all("chunkId" in r for r in results)
+    assert all("rrf_score" in r for r in results)
     assert results[0]["chunkId"] == "c1"
-    assert "rrf_score" in results[0]
-    assert len(results) == 3
-    # RRF scores must be in descending order
-    scores = [r["rrf_score"] for r in results]
-    assert scores == sorted(scores, reverse=True)

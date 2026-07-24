@@ -22,7 +22,7 @@ def load_parents(jsonl_path: Path) -> dict[str, dict]:
     return parents
 
 
-def _embed_query(
+def embed_query(
     query_text: str, embedder: EmbeddingProvider, cache: EmbedCache
 ) -> list[float]:
     cached = cache.get(embedder.model_id, query_text)
@@ -40,7 +40,7 @@ def dense_search(
     vector_store: VectorStore,
     n: int = 10,
 ) -> list[dict]:
-    query_vec = _embed_query(query_text, embedder, cache)
+    query_vec = embed_query(query_text, embedder, cache)
     return vector_store.query_dense(query_vec, n_results=n)
 
 
@@ -81,7 +81,8 @@ def hybrid_search(
     an added 'rrf_score' key.
     """
     candidates = n * 3
-    dense_results = dense_search(query_text, embedder, cache, vector_store, n=candidates)
+    query_vec = embed_query(query_text, embedder, cache)
+    dense_results = vector_store.query_dense(query_vec, n_results=candidates)
     bm25_results = bm25_search(query_text, bm25_store, n=candidates)
 
     scores: dict[str, float] = {}

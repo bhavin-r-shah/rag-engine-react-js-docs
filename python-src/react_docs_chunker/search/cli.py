@@ -14,7 +14,7 @@ from react_docs_chunker._cli_utils import build_embedder, build_vector_store
 from react_docs_chunker.config import EMBED_CACHE_PATH, JSONL_PATH
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.search.bm25 import BM25Store
-from react_docs_chunker.search.engine import bm25_search, dense_search, hybrid_search
+from react_docs_chunker.search.engine import bm25_search, dense_search, embed_query, hybrid_search
 
 
 def _load_children(jsonl_path: str) -> list[dict]:
@@ -48,7 +48,7 @@ def main() -> None:
         "--mode", choices=["dense", "bm25", "hybrid", "all"], default="hybrid"
     )
     parser.add_argument("--embedder", choices=["local", "openai"], default="local")
-    parser.add_argument("--vector-db", choices=["chroma"], default="chroma")
+    parser.add_argument("--vector-db", choices=["chroma", "qdrant"], default="qdrant")
     parser.add_argument("--jsonl", default=JSONL_PATH)
     parser.add_argument("--n", type=int, default=5, help="Number of results per mode")
     args = parser.parse_args()
@@ -60,7 +60,10 @@ def main() -> None:
 
     cache = EmbedCache(EMBED_CACHE_PATH)
     needs_dense = args.mode in ("dense", "hybrid", "all")
-    needs_bm25 = args.mode in ("bm25", "hybrid", "all")
+    # Qdrant hybrid uses its own internal sparse encoder; manual BM25 only needed for chroma
+    needs_bm25 = args.mode in ("bm25", "all") or (
+        args.mode == "hybrid" and args.vector_db != "qdrant"
+    )
 
     embedder = store = bm25 = None
 
@@ -85,7 +88,11 @@ def main() -> None:
         _print_results("BM25 (keyword)", results, args.n)
 
     if args.mode in ("hybrid", "all"):
-        results = hybrid_search(args.query, embedder, cache, store, bm25, n=args.n)
+        if args.vector_db == "qdrant":
+            query_vec = embed_query(args.query, embedder, cache)
+            results = store.query_hybrid(args.query, query_vec, n_results=args.n)
+        else:
+            results = hybrid_search(args.query, embedder, cache, store, bm25, n=args.n)
         _print_results("HYBRID (RRF)", results, args.n)
 
 
