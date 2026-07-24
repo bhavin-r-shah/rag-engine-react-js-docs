@@ -47,7 +47,10 @@ def main() -> None:
     parser.add_argument(
         "--mode", choices=["dense", "bm25", "hybrid", "all"], default="hybrid"
     )
-    parser.add_argument("--embedder", choices=["local", "openai"], default="local")
+    parser.add_argument(
+        "--embedder", choices=["local", "openai"], default=None,
+        help="must match the active manifest; omitted uses the indexed embedder",
+    )
     parser.add_argument("--vector-db", choices=["chroma", "qdrant"], default="qdrant")
     parser.add_argument("--jsonl", default=JSONL_PATH)
     parser.add_argument("--n", type=int, default=5, help="Number of results per mode")
@@ -55,7 +58,6 @@ def main() -> None:
 
     print(f"Query    : {args.query!r}")
     print(f"Mode     : {args.mode}")
-    print(f"Embedder : {args.embedder}")
     print(f"Vector DB: {args.vector_db}")
 
     cache = EmbedCache(EMBED_CACHE_PATH)
@@ -69,8 +71,20 @@ def main() -> None:
 
     if needs_dense:
         print("\nLoading embedder...")
-        embedder = build_embedder(args.embedder)
-        store = build_vector_store(args.vector_db, embedder)
+        manifest_path = Path("output/index_manifest.json")
+        if not manifest_path.exists():
+            parser.error("output/index_manifest.json is missing; build the index first")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        active_embedder = manifest["embedder"]
+        if args.embedder and args.embedder != active_embedder:
+            parser.error(
+                f"active index uses {active_embedder!r}; rebuild it to change embedders"
+            )
+        print(f"Embedder : {active_embedder} ({manifest.get('embeddingModel', '')})")
+        embedder = build_embedder(active_embedder)
+        store = build_vector_store(
+            args.vector_db, embedder, collection_name=manifest.get("collectionName")
+        )
 
     if needs_bm25:
         print("Building BM25 index from JSONL...")

@@ -1,58 +1,35 @@
-"""CLI entry point: embed child chunks and upsert to a vector store.
-
-Usage:
-    python -m react_docs_chunker.indexing.cli [--embedder {local,openai}] [--vector-db {chroma}]
-"""
-
+"""CLI for the one-time offline ingestion, chunking, embedding, and indexing run."""
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-from react_docs_chunker._cli_utils import build_embedder, build_vector_store
-from react_docs_chunker.config import (
-    EMBED_CACHE_PATH,
-    EMBEDDING_BATCH_SIZE,
-    JSONL_PATH,
-)
-from react_docs_chunker.embed.cache import EmbedCache
-from react_docs_chunker.indexing.indexer import run_indexing
+from react_docs_chunker.chunker import CHUNKING_METHODS
+from react_docs_chunker.config import JSONL_PATH, MAX_TOKENS, OVERLAP_TOKENS, TARGET_TOKENS
+from react_docs_chunker.indexing.pipeline import build_index
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Embed React doc chunks and upsert to a vector store.")
+    parser = argparse.ArgumentParser(description="Build the React documentation search index.")
     parser.add_argument("--embedder", choices=["local", "openai"], default="local")
     parser.add_argument("--vector-db", choices=["chroma", "qdrant"], default="qdrant")
+    parser.add_argument("--corpus", default="react-js-docs")
     parser.add_argument("--jsonl", default=JSONL_PATH)
+    parser.add_argument("--chunking-method", choices=CHUNKING_METHODS, default="markdown")
+    parser.add_argument("--target-tokens", type=int, default=TARGET_TOKENS)
+    parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
+    parser.add_argument("--overlap-tokens", type=int, default=OVERLAP_TOKENS)
     args = parser.parse_args()
 
-    print(f"Embedder : {args.embedder}")
-    print(f"Vector DB: {args.vector_db}")
-    print(f"JSONL    : {args.jsonl}")
-
-    if not Path(args.jsonl).exists():
-        print("\nJSONL not found — running chunker first...")
-        import tiktoken
-        from react_docs_chunker.chunker import chunk_corpus
-        from react_docs_chunker.config import TOKENIZER_ENCODING
-        encoding = tiktoken.get_encoding(TOKENIZER_ENCODING)
-        chunk_corpus(
-            Path("react-js-docs").resolve(),
-            Path(args.jsonl).resolve(),
-            lambda text: len(encoding.encode(text)),
-        )
-        print("Chunking complete.\n")
-
-    embedder = build_embedder(args.embedder)
-    cache = EmbedCache(EMBED_CACHE_PATH)
-    store = build_vector_store(args.vector_db, embedder)
-
-    stats = run_indexing(args.jsonl, embedder, cache, store, batch_size=EMBEDDING_BATCH_SIZE)
-
-    print(f"\nDone.")
-    print(f"  Total children : {stats['total_children']}")
-    print(f"  Cache hits     : {stats['cache_hits']}")
-    print(f"  Newly embedded : {stats['newly_embedded']}")
+    print("Running the offline pipeline: ingest -> chunk -> embed -> index")
+    result = build_index(
+        args.corpus, args.jsonl, args.embedder, args.chunking_method,
+        args.target_tokens, args.max_tokens, args.overlap_tokens,
+    )
+    print("\nIndex ready. Run this command again only when documents or index settings change.")
+    print(f"  Chunking method: {result['chunkingMethod']}")
+    print(f"  Total children : {result['total_children']}")
+    print(f"  Cache hits     : {result['cache_hits']}")
+    print(f"  Newly embedded : {result['newly_embedded']}")
 
 
 if __name__ == "__main__":

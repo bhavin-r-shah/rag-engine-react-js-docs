@@ -20,14 +20,14 @@ def build_embedder(name: str):
     raise ValueError(f"Unknown embedder: {name}")
 
 
-def build_vector_store(name: str, embedder):
+def build_vector_store(name: str, embedder, collection_name: str | None = None):
     if name == "chroma":
         from react_docs_chunker.indexing.chroma_store import ChromaVectorStore
         return ChromaVectorStore(
             model_id=embedder.model_id,
             dimensions=embedder.dimensions,
             db_dir=CHROMA_DB_DIR,
-            collection_name=CHROMA_COLLECTION,
+            collection_name=collection_name or CHROMA_COLLECTION,
         )
     if name == "qdrant":
         from react_docs_chunker.indexing.qdrant_store import QdrantVectorStore

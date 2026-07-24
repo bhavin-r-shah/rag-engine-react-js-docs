@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
-from react_docs_chunker.indexing.vector_store import VectorStore
+
+if TYPE_CHECKING:
+    from react_docs_chunker.indexing.vector_store import VectorStore
 
 
 def run_indexing(
@@ -23,6 +27,22 @@ def run_indexing(
         for line in jsonl_path.read_text(encoding="utf-8").splitlines()
         if line.strip() and json.loads(line).get("recordType") == "child"
     ]
+
+    id_counts = Counter(record["chunkId"] for record in children)
+    duplicate_ids = {chunk_id for chunk_id, count in id_counts.items() if count > 1}
+    if duplicate_ids:
+        examples = []
+        for record in children:
+            if record["chunkId"] in duplicate_ids:
+                examples.append(
+                    f"{record['chunkId']} ({record.get('sourcePath', 'unknown source')})"
+                )
+            if len(examples) == 3:
+                break
+        raise ValueError(
+            f"Found {len(duplicate_ids)} duplicate child chunk ID(s) before embedding. "
+            f"Examples: {', '.join(examples)}"
+        )
 
     total = len(children)
     cache_hits = 0

@@ -1,0 +1,16 @@
+Copyright (c) 2026 repository owner. All rights reserved.
+
+This repository is private learning and development work. No license or permission is
+granted to any other person or entity to use, copy, modify, merge, publish,
+distribute, sublicense, sell, deploy, host, or create derivative works from the
+repository owner's original software, documentation, configuration, or other original
+material.
+
+Access to or visibility of the source does not grant a license. Any permission must be
+obtained in advance in a separate written agreement from the repository owner.
+
+This restriction does not apply to third-party material included in the repository.
+In particular, files derived from the React documentation remain subject to their
+upstream license and attribution requirements described in LICENSE-REACT-DOCS.md.
+Nothing in this file limits rights granted directly by a third-party copyright holder
+under its own license.
