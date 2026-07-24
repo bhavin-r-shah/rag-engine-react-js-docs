@@ -25,6 +25,7 @@ def build_index(
     max_tokens: int = 900,
     overlap_tokens: int = 75,
     manifest_path: str | Path = "output/index_manifest.json",
+    vector_db_name: str = "qdrant",
 ) -> dict:
     """Run every offline stage explicitly; callers decide when this one-time work runs."""
     from react_docs_chunker.indexing.indexer import run_indexing
@@ -40,10 +41,14 @@ def build_index(
     )
     embedder = build_embedder(embedder_name)
     cache = EmbedCache(EMBED_CACHE_PATH)
-    store = build_vector_store("chroma", embedder, collection_name=collection_name)
-    stats = run_indexing(
-        staging_jsonl, embedder, cache, store, batch_size=EMBEDDING_BATCH_SIZE
-    )
+    store = build_vector_store(vector_db_name, embedder, collection_name=collection_name)
+    try:
+        stats = run_indexing(
+            staging_jsonl, embedder, cache, store, batch_size=EMBEDDING_BATCH_SIZE
+        )
+    finally:
+        cache.close()
+        store.close()
     manifest = {
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "recordCount": record_count,
@@ -57,6 +62,7 @@ def build_index(
         "embeddingModel": embedder.model_id,
         "dimensions": embedder.dimensions,
         "collectionName": collection_name,
+        "vectorDb": vector_db_name,
     }
     path = Path(manifest_path)
     path.parent.mkdir(parents=True, exist_ok=True)

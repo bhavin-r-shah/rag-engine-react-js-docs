@@ -11,7 +11,7 @@ from react_docs_chunker.indexing.pipeline import build_index
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the React documentation search index.")
     parser.add_argument("--embedder", choices=["local", "openai"], default="local")
-    parser.add_argument("--vector-db", choices=["chroma"], default="chroma")
+    parser.add_argument("--vector-db", choices=["chroma", "qdrant"], default="qdrant")
     parser.add_argument("--corpus", default="react-js-docs")
     parser.add_argument("--jsonl", default=JSONL_PATH)
     parser.add_argument("--chunking-method", choices=CHUNKING_METHODS, default="markdown")
@@ -24,6 +24,7 @@ def main() -> None:
     result = build_index(
         args.corpus, args.jsonl, args.embedder, args.chunking_method,
         args.target_tokens, args.max_tokens, args.overlap_tokens,
+        vector_db_name=args.vector_db,
     )
     print("\nIndex ready. Run this command again only when documents or index settings change.")
     print(f"  Chunking method: {result['chunkingMethod']}")

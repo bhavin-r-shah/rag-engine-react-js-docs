@@ -25,7 +25,7 @@ def load_parents(jsonl_path: Path) -> dict[str, dict]:
     return parents
 
 
-def _embed_query(
+def embed_query(
     query_text: str, embedder: EmbeddingProvider, cache: EmbedCache
 ) -> list[float]:
     # Document embeddings are cached during the one-time offline indexing stage.
@@ -41,7 +41,7 @@ def dense_search(
     n: int = 10,
     metadata_filters: dict[str, str] | None = None,
 ) -> list[dict]:
-    query_vec = _embed_query(query_text, embedder, cache)
+    query_vec = embed_query(query_text, embedder, cache)
     return vector_store.query_dense(
         query_vec, n_results=n, metadata_filters=metadata_filters
     )
@@ -85,8 +85,9 @@ def hybrid_search(
     an added 'rrf_score' key.
     """
     candidates = n * 3
-    dense_results = dense_search(
-        query_text, embedder, cache, vector_store, n=candidates,
+    query_vec = embed_query(
+        query_text, embedder, cache)
+    dense_results = vector_store.query_dense(query_vec, n_results=candidates,
         metadata_filters=metadata_filters,
     )
     bm25_results = bm25_search(query_text, bm25_store, n=candidates)

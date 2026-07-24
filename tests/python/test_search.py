@@ -11,7 +11,7 @@ import pytest
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
 from react_docs_chunker.indexing.indexer import run_indexing
-from react_docs_chunker.indexing.vector_store import ChromaVectorStore
+from react_docs_chunker.indexing.chroma_store import ChromaVectorStore
 from react_docs_chunker.search.bm25 import BM25Store
 from react_docs_chunker.search.engine import bm25_search, dense_search, hybrid_search
 
