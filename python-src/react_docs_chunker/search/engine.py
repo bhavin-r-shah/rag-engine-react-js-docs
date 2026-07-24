@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
-from react_docs_chunker.indexing.vector_store import VectorStore
-from react_docs_chunker.search.bm25 import BM25Store
+
+if TYPE_CHECKING:
+    from react_docs_chunker.indexing.vector_store import VectorStore
+    from react_docs_chunker.search.bm25 import BM25Store
 
 
 def load_parents(jsonl_path: Path) -> dict[str, dict]:
@@ -25,12 +28,9 @@ def load_parents(jsonl_path: Path) -> dict[str, dict]:
 def _embed_query(
     query_text: str, embedder: EmbeddingProvider, cache: EmbedCache
 ) -> list[float]:
-    cached = cache.get(embedder.model_id, query_text)
-    if cached is not None:
-        return cached
-    vec = embedder.embed_batch([query_text])[0]
-    cache.put(embedder.model_id, query_text, vec)
-    return vec
+    # Document embeddings are cached during the one-time offline indexing stage.
+    # User queries are online inputs and are embedded afresh for every search.
+    return embedder.embed_batch([query_text])[0]
 
 
 def dense_search(
@@ -39,9 +39,12 @@ def dense_search(
     cache: EmbedCache,
     vector_store: VectorStore,
     n: int = 10,
+    metadata_filters: dict[str, str] | None = None,
 ) -> list[dict]:
     query_vec = _embed_query(query_text, embedder, cache)
-    return vector_store.query_dense(query_vec, n_results=n)
+    return vector_store.query_dense(
+        query_vec, n_results=n, metadata_filters=metadata_filters
+    )
 
 
 def bm25_search(query_text: str, bm25_store: BM25Store, n: int = 10) -> list[dict]:
@@ -56,6 +59,7 @@ def hybrid_search(
     bm25_store: BM25Store,
     n: int = 10,
     rrf_k: int = 60,
+    metadata_filters: dict[str, str] | None = None,
 ) -> list[dict]:
     """Combine dense and BM25 results using Reciprocal Rank Fusion (RRF).
 
@@ -81,7 +85,10 @@ def hybrid_search(
     an added 'rrf_score' key.
     """
     candidates = n * 3
-    dense_results = dense_search(query_text, embedder, cache, vector_store, n=candidates)
+    dense_results = dense_search(
+        query_text, embedder, cache, vector_store, n=candidates,
+        metadata_filters=metadata_filters,
+    )
     bm25_results = bm25_search(query_text, bm25_store, n=candidates)
 
     scores: dict[str, float] = {}

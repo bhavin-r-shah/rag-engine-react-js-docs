@@ -1,48 +1,34 @@
-# User query and answer-generation design
+# User query and answer generation
 
-## Responsibility and status
+## Browser UI
 
-The user-query stage will validate a question, obtain evidence, construct grounded
-model context, and return an answer with citations. This entire stage is **proposed**;
-the repository does not currently expose a query API or invoke a generative model.
+Start the local server with:
 
-## Proposed request flow
+```bash
+python -m react_docs_chunker.ui.app
+```
 
-1. **Receive and validate:** require non-empty text, enforce length and request limits,
-   authenticate where applicable, and treat all input as untrusted data.
-2. **Normalize:** apply conservative Unicode/whitespace normalization without changing
-   case-sensitive API identifiers. Optional intent detection may derive filters, but
-   must retain the original question.
-3. **Retrieve:** call the provider-neutral [retrieval contract](retrieval.md) with the
-   validated question and permitted filters.
-4. **Assemble context:** select evidence within the generator token budget, preserve
-   code fences and breadcrumbs, deduplicate repeated parent material, and assign stable
-   citation labels tied to record IDs and URLs.
-5. **Generate:** instruct a model to answer only from supplied evidence, distinguish
-   version-sensitive facts, cite supporting sections, and say when evidence is
-   insufficient. Model integration remains behind an interface.
-6. **Validate response:** ensure emitted citations resolve to supplied records and
-   remove or reject unsupported citation identifiers. Never execute generated or
-   retrieved code.
-7. **Return:** provide the answer, citations, and safe request metadata; stream only if
-   citation validation remains possible before final completion.
+The page at `http://127.0.0.1:8000` provides online controls for Top K, dense/BM25/
+hybrid search, document type, content kind, and exact route. It also displays the active
+embedding provider as read-only and keeps the one-time offline index
+settings separately so a beginner can see that chunking and document embedding do not
+run for every question.
 
-## Context and citation shape
+## Per-question flow
 
-Each context item should include a citation ID, child text, optional expanded parent
-text, title, heading path, source URL, anchor, and content kind. Citation rendering
-uses only this map; the model cannot introduce an arbitrary URL. Context ordering
-follows retrieval rank while enforcing configurable source and parent diversity.
+1. Validate the non-empty question and Top K range.
+2. Build BM25 when required and/or embed the query afresh for dense retrieval.
+3. Apply selected metadata filters, search the active Chroma collection, and fuse
+   hybrid rankings.
+4. Resolve each child's parent from JSONL and create citation IDs and source links.
+5. When answer generation is enabled, send only the question and retrieved evidence
+   to the configured OpenAI chat model.
+6. Reject an answer that uses citation labels not supplied in the context.
+7. Return the answer, model details, retrieved chunks, scores, and citations as JSON.
 
-## Failure behavior and observability
+The default generation model is `gpt-4o-mini`; set `OPENAI_CHAT_MODEL` to choose
+another model available to the configured account. Clear **Generate an LLM answer**
+to perform retrieval without a generation API call.
 
-- Invalid requests return a clear client error without calling retrieval.
-- No or low-confidence evidence returns an explicit insufficient-evidence response.
-- Retrieval, embedding, or generation timeouts are bounded and classified separately.
-- Provider failures must not expose secrets, stack traces, or raw internal prompts.
-- Record latency by stage, result counts, token use, citation validation, refusal rate,
-  and provider errors. Avoid logging full questions, source bodies, or generated answers
-  unless an explicit privacy-reviewed retention policy permits it.
-
-Online feedback must not silently modify ranking or prompts. Feed reviewed failures
-into the version-controlled retrieval evaluation set instead.
+The server binds to `127.0.0.1` by default and is intended for local learning. It does
+not implement user authentication, request quotas, or production deployment controls.

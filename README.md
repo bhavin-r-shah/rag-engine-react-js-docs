@@ -13,9 +13,9 @@
 > [`LICENSE-REACT-DOCS.md`](LICENSE-REACT-DOCS.md).
 
 This project turns the Markdown files from the official React documentation into
-small JSON records called **chunks**. A future AI search or retrieval-augmented
-generation (RAG) application can search these chunks and give the relevant text to
-an AI model. You do not need to know Python or AI to run the chunking command.
+small JSON records called **chunks**, converts the searchable chunks into embeddings,
+stores them in ChromaDB, and searches them from a terminal or local browser UI. You
+do not need to know Python or AI to try the workflow.
 
 The input documents are in [`react-js-docs/`](react-js-docs/). The Python program
 reads them as text; it never runs JavaScript, JSX, MDX, or code examples found in
@@ -33,112 +33,153 @@ Every record includes the source file and React URL, title and heading path, sta
 IDs, a SHA-256 source checksum, content type, token count, and text. A **token** is a
 small unit of text used by an AI model; it is not exactly the same as a word.
 
+## Understand the two parts
+
+The pipeline deliberately separates expensive preparation from interactive questions:
+
+1. **Offline—run once:** ingest documents, chunk them, embed every child, and store the
+   vectors in ChromaDB. Run it again only when documents, chunking settings, or the
+   embedding model change.
+2. **Online—run for every question:** embed the new user query, search the existing
+   index, retrieve cited chunks, and optionally ask a chat model for a grounded answer.
+
 ## Step-by-step setup and run instructions
 
-Open a terminal in the folder where you want this repository, then follow the section
-for your operating system. If you already downloaded the repository, skip the `git
-clone` command and use `cd` to enter its folder.
+### 1. Create the Python environment
 
-### Windows 10 or 11 (Command Prompt)
+Install Git and Python 3.12, clone this repository, and enter it:
 
-1. Install Git and Python by copying these commands into **Command Prompt**:
-
-```bat
-winget install --id Git.Git -e --source winget
-winget install --id Python.Python.3.12 -e --source winget
-```
-
-2. Close Command Prompt, open it again, and verify the installations:
-
-```bat
-git --version
-python --version
-```
-
-3. Download the repository and enter its directory. Replace `<repository-url>` with
-   this repository's Git URL:
-
-```bat
+```bash
 git clone <repository-url>
 cd rag-engine-react-js-docs
 ```
 
-4. Create a private Python environment for this project, activate it, and install all
-   runtime and test prerequisites:
+**Windows Command Prompt:**
 
 ```bat
 python -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-python -m pip install -e ".[test]"
+python -m pip install -e ".[test,embed,embed-openai]"
 ```
 
-5. Run the complete implemented ingestion and chunking workflow:
-
-```bat
-python -m react_docs_chunker.cli
-```
-
-6. Confirm that the output was created, then run the automated tests:
-
-```bat
-dir output\react-doc-chunks.jsonl
-python -m pytest
-```
-
-When returning to the project later, run these commands from the repository folder:
-
-```bat
-.venv\Scripts\activate.bat
-python -m react_docs_chunker.cli
-```
-
-### macOS (Terminal)
-
-1. Install Apple's command-line tools and Homebrew, then install Python and Git:
+**macOS or Linux:**
 
 ```bash
-xcode-select --install
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install python@3.12 git
-```
-
-2. Download, set up, run, and test the project. Replace `<repository-url>` with this
-   repository's Git URL:
-
-```bash
-git clone <repository-url>
-cd rag-engine-react-js-docs
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[test]'
-python -m react_docs_chunker.cli
-ls -lh output/react-doc-chunks.jsonl
-python -m pytest
-```
-
-### Ubuntu or Debian Linux (Terminal)
-
-1. Install Git, Python, and the Python virtual-environment prerequisite:
-
-```bash
-sudo apt update
-sudo apt install -y git python3.12 python3.12-venv python3-pip
-```
-
-2. Download, set up, run, and test the project. Replace `<repository-url>` with this
-   repository's Git URL:
-
-```bash
-git clone <repository-url>
-cd rag-engine-react-js-docs
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e '.[test]'
-python -m react_docs_chunker.cli
-ls -lh output/react-doc-chunks.jsonl
+python -m pip install -e '.[test,embed,embed-openai]'
+```
+
+The OpenAI dependency is needed for generated answers. Set the key only in your
+terminal; never commit it:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_CHAT_MODEL="gpt-4o-mini"  # optional override
+```
+
+On Windows Command Prompt use `set OPENAI_API_KEY=your-api-key`.
+
+### 2. Run the offline pipeline once
+
+The indexing command performs ingestion, chunking, document embedding, and ChromaDB
+storage in one explicit run:
+
+```bash
+python -m react_docs_chunker.indexing.cli \
+  --chunking-method markdown \
+  --target-tokens 600 \
+  --max-tokens 900 \
+  --overlap-tokens 75 \
+  --embedder local
+```
+
+Windows Command Prompt users can put the command on one line. The run creates:
+
+- `output/react-doc-chunks.jsonl` — parent and child records;
+- `output/embed_cache.db` — reusable document embeddings;
+- `output/chroma_db/` — the persistent vector index; and
+- `output/index_manifest.json` — the active chunk and embedding settings.
+
+Do **not** run this command before every question. Rebuild only when the source files
+or offline settings change.
+
+### 3. Choose a chunking method
+
+The offline command supports:
+
+| Method | CLI value | When to use it |
+| --- | --- | --- |
+| Markdown-aware | `markdown` | Recommended for these docs. Keeps headings, breadcrumbs, paragraphs, and fenced code together where possible. |
+| Fixed length with overlap | `fixed` | Creates chunks near `--target-tokens` and repeats up to `--overlap-tokens` from the previous chunk. |
+| Recursive | `recursive` | Tries paragraphs, lines, sentences, and words in order until each piece fits the token budget. |
+
+For example, create 400-token fixed chunks with 50 tokens of overlap:
+
+```bash
+python -m react_docs_chunker.indexing.cli --chunking-method fixed --target-tokens 400 --max-tokens 400 --overlap-tokens 50
+```
+
+### 4. Start the browser UI
+
+```bash
+python -m react_docs_chunker.ui.app
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The sidebar separates:
+
+- **online controls:** Top K, dense/BM25/hybrid search, and metadata filters; and
+- **one-time offline controls:** chunking method, token length, maximum, overlap, and
+  document embedder, followed by the explicit Build/Rebuild button.
+
+The active query embedder is read-only because it must match the model used to build
+the index. To change it, choose a different document embedder in the offline section
+and rebuild the index.
+
+### 5. Use query controls and filters
+
+The UI offers these online controls, which do not rebuild the index:
+
+| Control | Meaning |
+| --- | --- |
+| `Top K` | Maximum number of retrieved chunks to return, from 1 to 50. |
+| `Hybrid` | Combines semantic dense search and exact-word BM25 ranking. |
+| `Dense` | Uses a fresh query embedding to find semantically similar chunks. |
+| `BM25` | Uses keyword matching and does not embed the query. |
+| `Document type` | Limits results to one corpus category, such as `learn`, `reference`, or `blog`. |
+| `Content` | Limits results to `prose`, `code`, or `prose_and_code`. |
+| `Exact route` | Limits results to one React documentation route. |
+| `Generate an LLM answer` | Calls the chat model when selected; otherwise only retrieved evidence is shown. |
+
+The three metadata filters are optional and combined with **AND**. For example,
+choosing document type `reference` and content `prose_and_code` returns only chunks
+that satisfy both conditions. Filter choices come from the active JSONL index.
+
+Enter a question and select **Ask**. For every question the server embeds that query
+again and searches the existing index. The page displays the generated answer plus
+expandable retrieved chunks, scores, and clickable React documentation citations.
+Clear **Generate an LLM answer** to inspect retrieval without calling the chat model.
+
+The default document/query embedder is local `all-mpnet-base-v2`. The default answer
+model is `gpt-4o-mini`, configurable with `OPENAI_CHAT_MODEL`. The same embedding
+provider must be used for offline indexing and online dense or hybrid search.
+
+### 6. Optional terminal-only search
+
+The browser is not required for retrieval:
+
+```bash
+python -m react_docs_chunker.search.cli "How does effect cleanup work?" --mode hybrid --n 5
+```
+
+The terminal command prints retrieved previews but does not generate the final chat
+answer.
+
+### 7. Run tests
+
+```bash
 python -m pytest
 ```
 
@@ -200,9 +241,10 @@ the upstream commit in `react-js-docs/.react-docs-commit`.
 
 ## What this project does not do yet
 
-The Python command prepares retrieval chunks, but it does not yet create embeddings,
-store vectors, search the chunks, or call an AI model. Those later RAG stages are
-described in [`low-level-design.md`](low-level-design.md).
+The project provides a local browser UI and grounded OpenAI answer generation. It is
+still a learning application, not a production service: it has no authentication,
+concurrent index-build coordination across processes, model reranker, or production
+deployment hardening. See [`low-level-design.md`](low-level-design.md).
 
 ## React documentation license and attribution
 

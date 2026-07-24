@@ -22,6 +22,10 @@ embed-openai = ["openai>=1", "tenacity>=8"]
 chunk-react-docs = "react_docs_chunker.cli:main"
 index-react-docs = "react_docs_chunker.indexing.cli:main"
 search-react-docs = "react_docs_chunker.search.cli:main"
+rag-react-docs-ui = "react_docs_chunker.ui.app:main"
+
+[tool.setuptools.package-data]
+react_docs_chunker = ["ui/*.html"]
 
 [tool.setuptools.packages.find]
 # Application packages live here rather than directly in the repository root.

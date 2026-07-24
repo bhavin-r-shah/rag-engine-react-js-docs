@@ -87,3 +87,65 @@ def test_fenced_heading_is_not_a_section_and_children_obey_limit(tmp_path):
 
     assert all(row["headingPath"] == ["Code"] for row in rows)
     assert all(row["tokenCount"] <= 20 for row in children)
+
+
+def test_fixed_chunking_uses_length_and_overlap(tmp_path):
+    corpus = tmp_path / "react-js-docs"
+    corpus.mkdir()
+    (corpus / "guide.md").write_text(
+        "one two three four five six seven eight nine ten", encoding="utf-8"
+    )
+    output = tmp_path / "chunks.jsonl"
+
+    chunk_corpus(corpus, output, word_count, target=6, maximum=6, overlap=2, method="fixed")
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    children = [row for row in rows if row["recordType"] == "child"]
+
+    assert len(children) >= 2
+    assert all(row["tokenCount"] <= 6 for row in children)
+    first_body = children[0]["text"].split("\n\n", 1)[1]
+    second_body = children[1]["text"].split("\n\n", 1)[1]
+    assert set(first_body.split()) & set(second_body.split())
+
+
+def test_recursive_chunking_prefers_paragraph_boundaries(tmp_path):
+    corpus = tmp_path / "react-js-docs"
+    corpus.mkdir()
+    (corpus / "guide.md").write_text(
+        "First short paragraph.\n\nSecond short paragraph.\n\nThird short paragraph.",
+        encoding="utf-8",
+    )
+    output = tmp_path / "chunks.jsonl"
+
+    chunk_corpus(corpus, output, word_count, target=7, maximum=7, overlap=0, method="recursive")
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    children = [row for row in rows if row["recordType"] == "child"]
+
+    assert len(children) >= 2
+    assert all(row["tokenCount"] <= 7 for row in children)
+    assert any("First short paragraph" in row["text"] for row in children)
+
+
+def test_unknown_chunking_method_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="method must be one of"):
+        chunk_corpus(tmp_path, tmp_path / "out.jsonl", word_count, method="unknown")
+
+
+def test_repeated_identical_sections_have_unique_deterministic_ids(tmp_path):
+    corpus = tmp_path / "react-js-docs"
+    corpus.mkdir()
+    (corpus / "repeated.md").write_text(
+        "# Same\n\nRepeated text.\n\n# Same\n\nRepeated text.\n",
+        encoding="utf-8",
+    )
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+
+    chunk_corpus(corpus, first, word_count)
+    chunk_corpus(corpus, second, word_count)
+    first_rows = [json.loads(line) for line in first.read_text().splitlines()]
+    second_rows = [json.loads(line) for line in second.read_text().splitlines()]
+    first_ids = [row["chunkId"] for row in first_rows]
+
+    assert len(first_ids) == len(set(first_ids))
+    assert first_ids == [row["chunkId"] for row in second_rows]

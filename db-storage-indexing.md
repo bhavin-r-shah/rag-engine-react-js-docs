@@ -1,48 +1,41 @@
 # Database storage and indexing design
 
-## Responsibility and status
+## One-time offline pipeline
 
-This stage will persist records and expose complementary semantic and exact-match
-indexes. It is **proposed**. The only implemented storage is newline-delimited JSON
-written by [`chunk_corpus`](python-src/react_docs_chunker/chunker.py#L257-L280); the
-repository does not currently connect to a vector database or search engine.
+Run ingestion, chunking, document embedding, and vector storage before interactive
+questions:
 
-## Proposed logical records
+```bash
+python -m react_docs_chunker.indexing.cli --chunking-method markdown --embedder local
+```
 
-- **Documents:** document ID, source path/URL, route, type, checksum, and pipeline
-  version.
-- **Parents:** parent chunk ID, document ID, complete section content, heading path,
-  anchor, content kind, and provenance.
-- **Children:** child chunk ID, parent ID, retrieval text, token count, metadata, and
-  embedding compatibility fields.
-- **Manifest:** source-to-record membership, schema and pipeline versions, embedding
-  model/dimensions, namespace, and successful ingestion time.
+Run this command once for a chosen corpus and configuration. Run it again only after
+source documents, chunking settings, or the embedding model change.
 
-Stable IDs are primary keys. Writes are idempotent upserts; replacing a changed
-document also deletes old chunk IDs absent from its new manifest. Deleting a source
-removes its children, parents, and document record without affecting unrelated files.
+## Stored outputs
 
-## Proposed indexes
+- `output/react-doc-chunks.jsonl` contains parents and searchable children.
+- `output/embed_cache.db` caches document embeddings.
+- `output/chroma_db/` contains the persistent `react_docs` Chroma collection.
+- `output/index_manifest.json` records creation time, chunk method and sizes,
+  tokenizer, embedding provider/model, dimensions, and record counts.
 
-Index child vectors for dense semantic similarity and child text in a lexical/BM25
-index for exact API names, props, error numbers, and phrases. Index route, document
-type, heading path, anchor, content kind, and publication date where available as
-filterable metadata. Parent bodies may be stored outside the high-cardinality search
-index but must resolve efficiently by `parentId`.
+Chroma stores each child's stable `chunkId`, vector, text, parent ID, route, document
+type, title, anchor, content kind, token count, source URL, and source path. Upserts
+avoid duplicates when the same ID is indexed again. Collection metadata rejects an
+incompatible embedding model or vector dimension.
 
-The [retrieval stage](retrieval.md) queries both child indexes, fuses their candidates,
-and hydrates parent content only after ranking.
+Before any embedding work begins, the indexer verifies that all child IDs are unique.
+The Chroma adapter checks again immediately before upsert, providing a clear project
+error instead of a late database `DuplicateIDError`.
 
-## Atomic publication
+Each build writes to a new Chroma collection and records that collection name in the
+manifest. JSONL and the manifest are replaced only after indexing succeeds. Therefore
+a chunking or embedding change cannot leave stale chunks in the active collection,
+and a failed build does not redirect queries away from the previous manifest. Older
+collections are retained for manual cleanup and rollback.
 
-Build each run in a new staging namespace:
-
-1. Upsert all staged documents, parents, children, vectors, and lexical fields.
-2. Verify counts, unique IDs, parent references, vector presence/dimensions, metadata,
-   and manifest membership.
-3. Mark the manifest complete only after all validation succeeds.
-4. Atomically switch the active alias or namespace pointer to the staged index.
-5. Retain or garbage-collect the previous namespace according to rollback policy.
-
-No failed or partially written namespace may become active. Readers continue using the
-previously validated namespace throughout staging.
+BM25 is not persisted; the online process rebuilds its in-memory keyword index from
+JSONL. ChromaDB is currently the only vector database. The local UI exposes a clearly
+labelled Build/Rebuild action, but it never starts offline indexing automatically when
+a user asks a question.

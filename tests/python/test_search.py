@@ -27,6 +27,7 @@ class StubEmbedder(EmbeddingProvider):
 
     def __init__(self, model: str = "stub-model") -> None:
         self._model = model
+        self.call_count = 0
 
     @property
     def model_id(self) -> str:
@@ -37,6 +38,7 @@ class StubEmbedder(EmbeddingProvider):
         return self.DIMS
 
     def embed_batch(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
+        self.call_count += 1
         result = []
         for text in texts:
             h = hashlib.sha256(text.encode()).digest()
@@ -92,6 +94,18 @@ def test_dense_search_returns_correct_chunk(tmp_path):
     # Same text as c1 → same vector → L2 distance 0 → c1 must be first
     results = dense_search("useEffect runs after every render", embedder, cache, store, n=1)
     assert results[0]["chunkId"] == "c1"
+
+
+def test_user_query_is_embedded_again_for_each_search(tmp_path):
+    embedder = StubEmbedder()
+    records = [_child("c1", "useEffect cleanup")]
+    _, cache, store, _ = _setup(tmp_path, embedder, records)
+    calls_after_offline_index = embedder.call_count
+
+    dense_search("same question", embedder, cache, store, n=1)
+    dense_search("same question", embedder, cache, store, n=1)
+
+    assert embedder.call_count == calls_after_offline_index + 2
 
 
 def test_bm25_search_ranks_exact_match_first(tmp_path):

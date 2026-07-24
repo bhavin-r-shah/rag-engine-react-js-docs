@@ -1,49 +1,35 @@
 # Retrieval design
 
-## Responsibility and status
+## Online responsibility
 
-Retrieval will turn a validated user search query into ranked, traceable evidence for
-answer generation. Dense search, lexical search, fusion, reranking, and parent hydration
-are all **proposed** and are not implemented in the current Python package.
+Retrieval runs for every user question against the already-built offline index. Dense
+and hybrid search create a fresh query embedding; the document vectors are not rebuilt.
 
-## Proposed retrieval pipeline
+## Search methods
 
-1. Accept normalized query text and optional filters from the
-   [user-query stage](user-query.md).
-2. Generate dense candidates from the query embedding against the compatible child
-   vector index.
-3. Generate lexical/BM25 candidates for exact identifiers, props, error numbers, and
-   phrases.
-4. Apply allowed filters such as route, document type, heading path, content kind, or
-   publication date in candidate generation where supported.
-5. Fuse dense and lexical rankings using a configured, evaluation-backed algorithm
-   such as reciprocal-rank fusion. Do not compare raw scores from unlike systems as if
-   they shared a scale.
-6. Optionally rerank a bounded candidate set with a provider-neutral reranker.
-7. Deduplicate by child ID, control repeated evidence from the same parent, and hydrate
-   selected parents when broader section context is required.
-8. Return ordered evidence with child text, parent content when requested, source URL,
-   route, title, heading path, anchor, scores, and retrieval-method diagnostics.
+- **Dense** embeds the question and retrieves nearby child vectors from ChromaDB.
+- **BM25** ranks exact terms using an in-memory index built from JSONL.
+- **Hybrid** retrieves candidates from both methods and combines their positions with
+  Reciprocal Rank Fusion (RRF).
 
-Candidate counts, fusion constants, metadata boosts, parent diversity, and reranking
-depth are configuration—not hard-coded assumptions.
+`Top K` controls how many final chunks are returned. It is safe to change Top K and
+search method per question because neither changes the stored index.
 
-## Citation and failure contract
+## Metadata filters
 
-Every result must retain a resolvable source URL and enough heading/anchor metadata to
-construct a section-level citation. Missing provenance is a validation failure, not a
-reason to invent a citation. If one retrieval backend is temporarily unavailable, a
-documented degraded mode may use the other backend and label telemetry accordingly;
-if trustworthy evidence is insufficient, the query layer must decline to fabricate an
-answer.
+The browser can restrict results by exact `docType`, `contentKind`, and `route`.
+Selected filters are combined with AND. Dense search passes them to Chroma before
+ranking; BM25 builds its in-memory index from matching JSONL children; hybrid applies
+the same filters to both candidate lists before RRF. An empty value means “all.”
 
-## Evaluation
+The available filter values are derived from child records in the active JSONL index,
+so the UI does not ask beginners to guess valid values.
 
-Maintain a version-controlled golden dataset covering conceptual learning questions,
-exact API lookups, code examples, warnings/errors, React Server Components,
-version-sensitive blog facts, and similar identifiers requiring disambiguation. Each
-case records acceptable routes, anchors, and expected facts.
+## Result and citation shape
 
-Compare dense-only, lexical-only, hybrid, and reranked variants using recall at K,
-mean reciprocal rank, section-level citation accuracy, latency, and cost. Use these
-results to select chunk limits and retrieval configuration.
+The reusable `RAGService` returns each child ID, matched text, parent text, score,
+route, title, heading path, and a citation URL formed from the source URL and anchor.
+The browser renders the generated answer separately from the retrieved evidence.
+
+The current system does not apply a second model reranker. BM25 uses simple lowercase
+whitespace tokenization, so punctuation-aware lexical analysis is a future improvement.

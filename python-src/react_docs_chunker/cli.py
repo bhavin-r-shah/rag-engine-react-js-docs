@@ -17,7 +17,7 @@ from pathlib import Path
 # (tokens) used by AI models, which is more useful than counting characters.
 import tiktoken
 
-from .chunker import chunk_corpus
+from .chunker import CHUNKING_METHODS, chunk_corpus
 from .config import MAX_TOKENS, OVERLAP_TOKENS, TARGET_TOKENS, TOKENIZER_ENCODING
 
 
@@ -33,6 +33,10 @@ def main() -> None:
     parser.add_argument("--target-tokens", type=int, default=TARGET_TOKENS)
     parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     parser.add_argument("--overlap-tokens", type=int, default=OVERLAP_TOKENS)
+    parser.add_argument(
+        "--chunking-method", choices=CHUNKING_METHODS, default="markdown",
+        help="markdown-aware, fixed-length overlap, or recursive splitting",
+    )
     args = parser.parse_args()  # Read and validate the values typed by the user.
 
     # cl100k_base is a practical OpenAI-family tokenizer. Counting model tokens is
@@ -44,7 +48,10 @@ def main() -> None:
     count = lambda text: len(encoding.encode(text))  # noqa: E731 - intentionally tiny adapter
     # resolve() changes relative paths into unambiguous absolute paths before work
     # begins. chunk_corpus returns the number of JSONL records it wrote.
-    total = chunk_corpus(args.corpus.resolve(), args.output.resolve(), count, args.target_tokens, args.max_tokens, args.overlap_tokens)
+    total = chunk_corpus(
+        args.corpus.resolve(), args.output.resolve(), count, args.target_tokens,
+        args.max_tokens, args.overlap_tokens, args.chunking_method,
+    )
     print(f"Wrote {total} parent/child records to {args.output}")
 
 
