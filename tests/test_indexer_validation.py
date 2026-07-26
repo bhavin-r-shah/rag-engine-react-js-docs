@@ -1,12 +1,14 @@
-"""Dependency-free validation tests that run without ChromaDB installed."""
+"""Dependency-free validation tests that run without ChromaDB or Qdrant installed."""
 
-import json
+from __future__ import annotations
 
 import pytest
 
 from react_docs_chunker.embed.cache import EmbedCache
 from react_docs_chunker.embed.embedder import EmbeddingProvider
 from react_docs_chunker.indexing.indexer import run_indexing
+
+from _test_utils import make_child, write_jsonl
 
 
 class TrackingEmbedder(EmbeddingProvider):
@@ -31,12 +33,10 @@ class RejectingStore:
 
 
 def test_duplicate_ids_fail_before_embedding_or_upsert(tmp_path):
-    path = tmp_path / "chunks.jsonl"
-    records = [
-        {"recordType": "child", "chunkId": "duplicate", "text": "first", "sourcePath": "a.md"},
-        {"recordType": "child", "chunkId": "duplicate", "text": "second", "sourcePath": "b.md"},
-    ]
-    path.write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+    path = write_jsonl(tmp_path, [
+        make_child("duplicate", "first", sourcePath="a.md"),
+        make_child("duplicate", "second", sourcePath="b.md"),
+    ])
     embedder = TrackingEmbedder()
 
     with pytest.raises(ValueError, match="1 duplicate child chunk ID"):

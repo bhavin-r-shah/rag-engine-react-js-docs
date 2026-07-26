@@ -35,4 +35,4 @@ where = ["python-src"]
 [tool.pytest.ini_options]
 # These settings let pytest import the package and find only the Python test folder.
 pythonpath = ["python-src"]
-testpaths = ["tests/python"]
+testpaths = ["tests"]

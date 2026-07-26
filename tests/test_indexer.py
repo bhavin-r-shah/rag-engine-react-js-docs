@@ -2,86 +2,27 @@
 
 from __future__ import annotations
 
-import json
-
 import chromadb
 import pytest
 
 from react_docs_chunker.embed.cache import EmbedCache
-from react_docs_chunker.embed.embedder import EmbeddingProvider
-from react_docs_chunker.indexing.indexer import run_indexing
 from react_docs_chunker.indexing.chroma_store import ChromaVectorStore
+from react_docs_chunker.indexing.indexer import run_indexing
 
+from _test_utils import StubEmbedder, chroma_store, make_child, write_jsonl
 
-# ---------------------------------------------------------------------------
-# Stub
-# ---------------------------------------------------------------------------
-
-class StubEmbedder(EmbeddingProvider):
-    DIMS = 4
-
-    def __init__(self, model: str = "stub-model") -> None:
-        self._model = model
-
-    @property
-    def model_id(self) -> str:
-        return self._model
-
-    @property
-    def dimensions(self) -> int:
-        return self.DIMS
-
-    def embed_batch(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
-        # Deterministic: hash of text index drives the vector value
-        return [[float(i + 1)] * self.DIMS for i, _ in enumerate(texts)]
-
-
-def _make_jsonl(tmp_path, records: list[dict]) -> str:
-    path = tmp_path / "chunks.jsonl"
-    path.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
-    return str(path)
-
-
-def _child(chunk_id: str, text: str, parent_id: str = "p1") -> dict:
-    return {
-        "recordType": "child",
-        "chunkId": chunk_id,
-        "parentId": parent_id,
-        "text": text,
-        "route": "/test",
-        "docType": "reference",
-        "title": "Test",
-        "anchor": "",
-        "contentKind": "prose",
-        "tokenCount": 10,
-        "sourceUrl": "https://example.com/test",
-        "sourcePath": "test.md",
-    }
-
-
-def _chroma_store(embedder: StubEmbedder) -> ChromaVectorStore:
-    return ChromaVectorStore(
-        model_id=embedder.model_id,
-        dimensions=embedder.dimensions,
-        client=chromadb.EphemeralClient(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 def test_upsert_and_dense_query_returns_correct_chunk(tmp_path):
     embedder = StubEmbedder()
     cache = EmbedCache(tmp_path / "cache.db")
-    store = _chroma_store(embedder)
+    store = chroma_store(embedder)
 
     records = [
-        _child("c1", "useEffect runs after every render"),
-        _child("c2", "useState returns a pair"),
-        _child("c3", "useRef persists a mutable value"),
+        make_child("c1", "useEffect runs after every render"),
+        make_child("c2", "useState returns a pair"),
+        make_child("c3", "useRef persists a mutable value"),
     ]
-    jsonl = _make_jsonl(tmp_path, records)
+    jsonl = write_jsonl(tmp_path, records)
 
     run_indexing(jsonl, embedder, cache, store)
 
@@ -95,10 +36,10 @@ def test_upsert_and_dense_query_returns_correct_chunk(tmp_path):
 def test_rerun_is_idempotent(tmp_path):
     embedder = StubEmbedder()
     cache = EmbedCache(tmp_path / "cache.db")
-    store = _chroma_store(embedder)
+    store = chroma_store(embedder)
 
-    records = [_child("c1", "text one"), _child("c2", "text two")]
-    jsonl = _make_jsonl(tmp_path, records)
+    records = [make_child("c1", "text one"), make_child("c2", "text two")]
+    jsonl = write_jsonl(tmp_path, records)
 
     run_indexing(jsonl, embedder, cache, store)
     run_indexing(jsonl, embedder, cache, store)  # second run — must not duplicate
@@ -120,7 +61,7 @@ def test_model_mismatch_raises(tmp_path):
         collection_name="test_col",
     )
     store_a.upsert_chunks(
-        [_child("c1", "hello")],
+        [make_child("c1", "hello")],
         embedder_a.embed_batch(["hello"]),
     )
 
@@ -136,10 +77,10 @@ def test_model_mismatch_raises(tmp_path):
 def test_cache_hits_on_second_run(tmp_path):
     embedder = StubEmbedder()
     cache = EmbedCache(tmp_path / "cache.db")
-    store = _chroma_store(embedder)
+    store = chroma_store(embedder)
 
-    records = [_child("c1", "some text")]
-    jsonl = _make_jsonl(tmp_path, records)
+    records = [make_child("c1", "some text")]
+    jsonl = write_jsonl(tmp_path, records)
 
     stats1 = run_indexing(jsonl, embedder, cache, store)
     stats2 = run_indexing(jsonl, embedder, cache, store)
@@ -151,11 +92,9 @@ def test_cache_hits_on_second_run(tmp_path):
 
 def test_dense_query_applies_exact_metadata_filters(tmp_path):
     embedder = StubEmbedder()
-    store = _chroma_store(embedder)
-    reference = _child("c1", "reference text")
-    learn = _child("c2", "learning text")
-    reference["docType"] = "reference"
-    learn["docType"] = "learn"
+    store = chroma_store(embedder)
+    reference = make_child("c1", "reference text")
+    learn = make_child("c2", "learning text", docType="learn")
     store.upsert_chunks(
         [reference, learn], embedder.embed_batch([reference["text"], learn["text"]])
     )
@@ -171,9 +110,9 @@ def test_dense_query_applies_exact_metadata_filters(tmp_path):
 def test_duplicate_ids_fail_before_embedding(tmp_path):
     embedder = StubEmbedder()
     cache = EmbedCache(tmp_path / "cache.db")
-    store = _chroma_store(embedder)
-    jsonl = _make_jsonl(
-        tmp_path, [_child("duplicate", "first"), _child("duplicate", "second")]
+    store = chroma_store(embedder)
+    jsonl = write_jsonl(
+        tmp_path, [make_child("duplicate", "first"), make_child("duplicate", "second")]
     )
 
     with pytest.raises(ValueError, match="duplicate child chunk ID"):
@@ -184,8 +123,8 @@ def test_duplicate_ids_fail_before_embedding(tmp_path):
 
 def test_vector_store_rejects_duplicate_ids_defensively():
     embedder = StubEmbedder()
-    store = _chroma_store(embedder)
-    records = [_child("duplicate", "first"), _child("duplicate", "second")]
+    store = chroma_store(embedder)
+    records = [make_child("duplicate", "first"), make_child("duplicate", "second")]
 
     with pytest.raises(ValueError, match="not unique"):
         store.upsert_chunks(records, embedder.embed_batch(["first", "second"]))
