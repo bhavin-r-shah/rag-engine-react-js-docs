@@ -36,39 +36,16 @@ code cold:
 
 ## Commands
 
-Activate the virtual environment first on Windows:
-```bat
-.venv\Scripts\activate.bat
-```
+Activate the virtual environment: `.venv\Scripts\activate.bat` (Windows) or
+`source .venv/bin/activate` (macOS/Linux).
 
-On macOS/Linux:
-```bash
-source .venv/bin/activate
-```
+Install: `python -m pip install -e ".[test]"` (base). Add the `embed` extra for local
+embedding + both vector-store backends, or `embed-openai` for the OpenAI embedder —
+the latter also needs `export OPENAI_API_KEY=sk-...` (`OPENAI_CHAT_MODEL` optionally
+overrides the answer-generation model).
 
-Install (including test dependencies):
-```bash
-python -m pip install -e ".[test]"
-```
-
-Install with local embedding + both vector-store backends (sentence-transformers, chromadb,
-rank-bm25, qdrant-client, fastembed):
-```bash
-python -m pip install -e ".[embed,test]"
-```
-
-Install with the OpenAI embedder instead of / alongside local:
-```bash
-python -m pip install -e ".[embed-openai,test]"
-export OPENAI_API_KEY=sk-...   # also required for answer generation
-```
-
-Run the chunker only (default paths):
-```bash
-python -m react_docs_chunker.cli
-```
-
-Run with custom paths, chunk size overrides, and chunking method:
+Run the chunker alone (omit the trailing args to use `react-js-docs/` →
+`output/react-doc-chunks.jsonl` with `config.py` defaults):
 ```bash
 python -m react_docs_chunker.cli ./react-js-docs ./output/custom.jsonl --target-tokens 600 --max-tokens 900 --overlap-tokens 75 --chunking-method markdown
 ```
@@ -89,15 +66,8 @@ Run the local browser UI (build/rebuild the index and ask questions):
 python -m react_docs_chunker.ui.app
 ```
 
-Run all tests:
-```bash
-python -m pytest
-```
-
-Run a single test:
-```bash
-python -m pytest tests/test_chunker.py::test_chunks_nested_headings_and_preserves_code
-```
+Run tests: `python -m pytest`. Run a single test:
+`python -m pytest tests/test_chunker.py::test_chunks_nested_headings_and_preserves_code`.
 
 Refresh the React docs corpus from upstream:
 ```bash
@@ -137,9 +107,9 @@ Package layout under `python-src/react_docs_chunker/`:
   (`ChromaVectorStore`) and `qdrant_store.py` (`QdrantVectorStore`) implement it — see
   `docs/db-storage-indexing.md` for how the two backends differ. `indexer.py::run_indexing()` reads
   the JSONL, checks the embedding cache, embeds cache misses in batches, and upserts idempotently
-  (duplicate `chunkId`s are rejected before embedding). `pipeline.py::build_index()` runs
-  ingest → chunk → embed → index end-to-end and writes `output/index_manifest.json`. `cli.py` is
-  the `index-react-docs` entry point (`--embedder {local,openai}`, `--vector-db {chroma,qdrant}`).
+  (duplicate `chunkId`s are rejected before embedding). `pipeline.py::build_index()` is the
+  end-to-end entry point shown in the Architecture diagram above. `cli.py` is the
+  `index-react-docs` entry point (`--embedder {local,openai}`, `--vector-db {chroma,qdrant}`).
 - **`search/`** — `bm25.py` (`BM25Store`) builds an in-memory keyword index from child records at
   startup (rebuilt from JSONL in seconds, no persistence). `engine.py` provides `dense_search`,
   `bm25_search`, and `hybrid_search`; see `docs/retrieval.md` for how hybrid fusion differs between
@@ -156,8 +126,8 @@ Package layout under `python-src/react_docs_chunker/`:
 - **`ui/`** — `app.py` is a dependency-free `http.server`-based local UI (`rag-react-docs-ui`
   entry point) serving `index.html` and two JSON endpoints: `POST /api/index` (runs
   `build_index`) and `POST /api/query` (runs `RAGService.query`). `index.html` is a single
-  self-contained page with offline setup controls (embedder, vector-db, chunking method, token
-  settings) and an online query panel (search mode, top K, metadata filters).
+  self-contained page with offline setup and online query panels — see
+  `docs/user-query.md` for what each control does.
 
 ### Key design constraints
 
@@ -181,9 +151,6 @@ Package layout under `python-src/react_docs_chunker/`:
 - `VectorStore` implementations (and `EmbedCache`) own real connections and must be `close()`d;
   callers open them and close them in a `finally` block (see `pipeline.py`, `search/cli.py`,
   `rag/service.py` for the pattern).
-- `ChromaVectorStore.query_hybrid` intentionally raises `NotImplementedError` — Chroma hybrid
-  search is done by `search/engine.py::hybrid_search` (manual RRF over `query_dense` + BM25).
-  `QdrantVectorStore.query_hybrid` does native RRF fusion in a single Qdrant call.
 
 ### Output record shape
 
