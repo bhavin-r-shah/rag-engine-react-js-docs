@@ -3,8 +3,9 @@
 ## Offline document embeddings
 
 An embedding is a number vector representing text. During the one-time offline
-pipeline, only child records are embedded and stored in ChromaDB. Parent records stay
-in JSONL for expanded context and citations.
+pipeline, only child records are embedded and stored in the configured vector store
+(ChromaDB or Qdrant — see [`db-storage-indexing.md`](db-storage-indexing.md)). Parent
+records stay in JSONL for expanded context and citations.
 
 The supported providers implement `EmbeddingProvider`:
 
@@ -17,7 +18,7 @@ A repeat offline build can therefore reuse unchanged embeddings.
 ## Online query embeddings
 
 Every dense or hybrid search embeds the current user query again with the same
-provider/model used to build the Chroma collection. Query embeddings are deliberately
+provider/model used to build the active collection. Query embeddings are deliberately
 not reused from the document cache. BM25-only search does not create a query vector.
 
 Embedding models do not write natural-language answers. After retrieval, the separate

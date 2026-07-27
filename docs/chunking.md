@@ -49,3 +49,43 @@ IDs, parent IDs, provenance, token counts, and text. Section and child positions
 IDs unique even when one document repeats identical headings or text. Changing the
 method or token settings changes the searchable corpus, so run the offline indexing
 pipeline again. These are not per-question options.
+
+## Default configuration
+
+The default variables are all in
+[`python-src/react_docs_chunker/config.py`](python-src/react_docs_chunker/config.py):
+
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `CHUNK_BY_HEADING` | `True` | Start semantic sections at Markdown headings. |
+| `TARGET_TOKENS` | `600` | Split an oversized section when a child grows beyond this target. |
+| `MAX_TOKENS` | `900` | Hard maximum for a retrieval child, including its heading breadcrumb. |
+| `OVERLAP_TOKENS` | `75` | Context repeated between children from the same oversized section. |
+| `TOKENIZER_ENCODING` | `cl100k_base` | Token-counting vocabulary used by the program. |
+
+Heading-aware parent/child chunking is recommended because a heading gives React API
+text its meaning. The program keeps a complete section as its parent, retrieves
+smaller children, keeps fenced code with nearby explanations where possible, and
+repeats only complete Markdown blocks for overlap. The defaults are starting values;
+measure retrieval recall and citation quality before changing them for production.
+
+## Running the chunker standalone
+
+The `python -m react_docs_chunker.indexing.cli` pipeline (see
+[`db-storage-indexing.md`](db-storage-indexing.md)) runs chunking automatically. To run
+chunking alone — for example to inspect JSONL output without embedding or indexing —
+use the chunker CLI directly with explicit paths and overrides:
+
+```bash
+python -m react_docs_chunker.cli ./react-js-docs ./output/custom.jsonl \
+  --target-tokens 600 --max-tokens 900 --overlap-tokens 75 --chunking-method markdown
+```
+
+On Windows Command Prompt, put the same command on one line:
+
+```bat
+python -m react_docs_chunker.cli .\react-js-docs .\output\custom.jsonl --target-tokens 600 --max-tokens 900 --overlap-tokens 75
+```
+
+Run `python -m react_docs_chunker.cli --help` to see every option. See
+[`ingestion.md`](ingestion.md) for the JSONL record shape this command produces.
